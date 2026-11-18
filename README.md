@@ -15,7 +15,7 @@ Tiny (~12 MB) · zero dependencies · Windows · macOS · Linux
 <img src="docs/light-history.png" width="290" alt="History (light)">&nbsp;
 <img src="docs/dark-settings.png" width="290" alt="Settings (dark)">
 
-<sub>Screenshots use sample files.</sub>
+<sub>Screenshots use sample files. BuzzDrop is an independent, unofficial app and is not affiliated with or endorsed by BuzzHeavier.</sub>
 
 </div>
 

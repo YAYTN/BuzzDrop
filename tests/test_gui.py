@@ -206,7 +206,8 @@ class GuiEndToEnd(unittest.TestCase):
         root, app, exe, cleanup = self._update_app()                  # a fresh app: skipping a version
         try:
             app.skip_update()
-            self.assertEqual(app.settings["skipped_version"], "1.0.1")
+            from .test_updater import NEW_VERSION
+            self.assertEqual(app.settings["skipped_version"], NEW_VERSION)
             self.assertIsNone(app.update_info)
             self.assertEqual(exe.read_bytes(), b"OLD")
         finally:
@@ -283,6 +284,115 @@ class GuiEndToEnd(unittest.TestCase):
             try:
                 app.quit()
                 self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
+    def _uninstall_run(self, answers):
+        """Click "Uninstall…" with scripted yes/no answers; returns what the uninstaller was asked to do."""
+        import tkinter as tk
+        from unittest import mock
+        from buzzdrop import uninstall
+        from buzzdrop.gui import app as A
+
+        calls, shown = {}, []
+
+        def fake_remove(exe):
+            calls["integrations"] = exe
+            return ["removed the integrations"], []
+
+        def fake_finish(keep_data=False, remove_program=True, exe=None):
+            calls["finish_keep_data"] = keep_data
+            return uninstall.Report(done=["deleted your settings and history"] if not keep_data else [],
+                                    program="scheduled")
+        script = iter(answers)
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            with mock.patch.object(uninstall, "remove_integrations", fake_remove), \
+                    mock.patch.object(uninstall, "finish", fake_finish), \
+                    mock.patch.object(A.messagebox, "askyesno", lambda *a, **k: next(script)), \
+                    mock.patch.object(A.messagebox, "showinfo", lambda *a, **k: shown.append(a)), \
+                    mock.patch.object(A.messagebox, "showwarning", lambda *a, **k: shown.append(a)):
+                app.uninstall_flow()
+                try:
+                    self._pump(root, lambda: False, timeout=1.0)          # let quit() run to the end
+                except tk.TclError:
+                    pass
+            app.was_closing = app._closing                                # before the cleanup below quits it
+            return calls, shown, app
+        finally:
+            try:
+                app.quit()
+            except tk.TclError:
+                pass
+
+    def test_uninstall_button_removes_everything_when_confirmed(self):
+        calls, shown, app = self._uninstall_run([True, True])            # "Uninstall?" yes · "delete my data too?" yes
+        self.assertIn("integrations", calls)                              # undone right away …
+        self.assertIs(calls["finish_keep_data"], False)                   # … and the data deleted at the end
+        self.assertTrue(app.was_closing)
+        self.assertEqual(len(shown), 1)
+        self.assertIn("has been removed", shown[0][1])
+        self.assertIn("nothing of BuzzDrop is left behind", shown[0][1])
+
+    def test_uninstall_button_can_keep_settings_and_history(self):
+        calls, shown, app = self._uninstall_run([True, False])           # … but "delete my data too?" no
+        self.assertIs(calls["finish_keep_data"], True)
+        self.assertIn("kept", shown[0][1])
+
+    def test_uninstall_button_does_nothing_when_cancelled(self):
+        calls, shown, app = self._uninstall_run([False])                 # "Uninstall?" no
+        self.assertEqual(calls, {})
+        self.assertEqual(shown, [])
+        self.assertFalse(app.was_closing)                                # nothing happened, the app keeps running
+
+    def test_the_windows_apps_uninstall_button_dialog(self):
+        """`BuzzDrop --uninstall` (what Settings → Apps → Uninstall runs): asks, uninstalls, reports."""
+        from unittest import mock
+        from buzzdrop import uninstall
+        seen = []
+
+        def fake_run_all(keep_data=False, remove_program=True):
+            seen.append((keep_data, remove_program))
+            return uninstall.Report(done=["removed it"], program="scheduled")
+        infos = []
+        with mock.patch.object(uninstall, "run_all", fake_run_all), \
+                mock.patch("tkinter.messagebox.askyesno", side_effect=[True, True]), \
+                mock.patch("tkinter.messagebox.showinfo", lambda *a, **k: infos.append(a)):
+            self.assertEqual(uninstall.run_dialog(), 0)                  # yes, and "delete my data too" yes
+        self.assertEqual(seen, [(False, True)])
+        self.assertIn("nothing of BuzzDrop is left", infos[0][1])
+        seen.clear()
+        with mock.patch.object(uninstall, "run_all", fake_run_all), \
+                mock.patch("tkinter.messagebox.askyesno", side_effect=[True, False]), \
+                mock.patch("tkinter.messagebox.showinfo", lambda *a, **k: None):
+            uninstall.run_dialog()                                       # yes, but keep my data
+        self.assertEqual(seen, [(True, True)])
+        seen.clear()
+        with mock.patch.object(uninstall, "run_all", fake_run_all), \
+                mock.patch("tkinter.messagebox.askyesno", side_effect=[False]):
+            self.assertEqual(uninstall.run_dialog(), 1)                  # no: nothing happens
+        self.assertEqual(seen, [])
+
+    def test_a_quit_message_closes_the_app(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            app.handle_payload({"cmd": "quit"})                          # what the uninstaller sends to a tray copy
+            self.assertTrue(app._closing)
+            try:
+                self._pump(root, lambda: False, timeout=0.5)
+            except tk.TclError:
+                pass
+        finally:
+            try:
+                app.quit()
             except tk.TclError:
                 pass
 

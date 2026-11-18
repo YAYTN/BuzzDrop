@@ -16,7 +16,7 @@ from unittest import mock
 from buzzdrop import REPO, __version__, updater
 
 ROOT = Path(__file__).resolve().parent.parent
-NEW_VERSION = "1.0.1"
+NEW_VERSION = "%d.%d.%d" % (lambda a, b, c: (a, b, c + 1))(*(int(x) for x in __version__.split(".")))  # always one patch newer
 APP_BYTES = os.urandom(300_000)
 
 

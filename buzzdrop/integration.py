@@ -24,7 +24,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from . import APP_NAME
 from .config import data_dir, is_frozen
@@ -103,33 +103,49 @@ if IS_WIN:
     _MENU_KEYS = (_CLASSES + r"\*\shell\BuzzDrop.Send", _CLASSES + r"\Directory\shell\BuzzDrop.Send")
     _RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
-    def _set(path: str, name: str, value: str, kind: int = winreg.REG_SZ) -> None:
-        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE) as k:
+    def _p(path: str) -> str:
+        """Registry path actually used. ``BUZZ_TEST_REG_PREFIX`` (tests only) moves everything into a
+        throw-away sandbox key so a test can install and uninstall without touching the real registry."""
+        prefix = os.environ.get("BUZZ_TEST_REG_PREFIX", "").strip("\\")
+        return prefix + "\\" + path if prefix else path
+
+    def _set(path: str, name: str, value, kind: int = winreg.REG_SZ) -> None:
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _p(path), 0, winreg.KEY_SET_VALUE) as k:
             winreg.SetValueEx(k, name, 0, kind, value)
 
     def _get(path: str, name: str = ""):
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as k:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _p(path)) as k:
                 return winreg.QueryValueEx(k, name)[0]
         except OSError:
             return None
 
-    def _delete_tree(path: str) -> None:
+    def _key_exists(path: str) -> bool:
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_ALL_ACCESS) as k:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _p(path)):
+                return True
+        except OSError:
+            return False
+
+    def _delete_raw(full: str) -> None:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, full, 0, winreg.KEY_ALL_ACCESS) as k:
                 while True:
                     try:
                         child = winreg.EnumKey(k, 0)
                     except OSError:
                         break
-                    _delete_tree(path + "\\" + child)
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+                    _delete_raw(full + "\\" + child)
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, full)
         except FileNotFoundError:
             pass
 
+    def _delete_tree(path: str) -> None:
+        _delete_raw(_p(path))
+
     def _delete_value(path: str, name: str) -> None:
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE) as k:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _p(path), 0, winreg.KEY_SET_VALUE) as k:
                 winreg.DeleteValue(k, name)
         except FileNotFoundError:
             pass
@@ -193,6 +209,60 @@ if IS_WIN:
         value = _get("Environment", "Path") or ""
         return [p for p in value.split(";") if p]
 
+    _UNINSTALL = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\BuzzDrop"   # Settings → Apps
+
+    def _uninstall_values() -> Dict[str, Any]:
+        from . import REPO, REPO_URL, __version__
+        vals: Dict[str, Any] = {
+            "DisplayName": APP_NAME, "DisplayVersion": __version__, "Publisher": REPO.split("/")[0],
+            "DisplayIcon": _icon_ref(), "UninstallString": _cmdline(launch_command()) + " --uninstall",
+            "URLInfoAbout": REPO_URL,
+        }
+        if is_frozen():
+            vals["InstallLocation"] = str(Path(sys.executable).resolve().parent)
+        return vals
+
+    def _w_register_uninstall() -> None:
+        for name, value in _uninstall_values().items():
+            _set(_UNINSTALL, name, value)
+        _set(_UNINSTALL, "NoModify", 1, winreg.REG_DWORD)
+        _set(_UNINSTALL, "NoRepair", 1, winreg.REG_DWORD)
+
+    def _w_uninstall_entry_current() -> bool:
+        return all(_get(_UNINSTALL, k) == v for k, v in _uninstall_values().items())
+
+    def _w_forget_traces(exe: Path) -> None:
+        """Windows' own bookkeeping about a program it has run (shown nowhere, but part of 'completely gone')."""
+        key = str(exe)
+        for path, names in (
+                (r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache",
+                 (key + ".FriendlyAppName", key + ".ApplicationCompany")),
+                (r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store", (key,)),
+                (r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers", (key,))):
+            for name in names:
+                _delete_value(path, name)
+
+    def _w_leftovers() -> List[str]:
+        left = []
+        if _key_exists(_PROTO) and "buzzdrop" in (_get(_PROTO + r"\shell\open\command") or "").lower():
+            left.append("BZ:// link handler (registry)")
+        for key in _MENU_KEYS:
+            if _key_exists(key):
+                left.append("right-click menu entry for %s (registry)" % ("files" if "\\*\\" in key else "folders"))
+        if _get(_RUN, APP_NAME):
+            left.append("start-at-login entry (registry)")
+        if _key_exists(_UNINSTALL):
+            left.append("entry in Settings > Apps (registry)")
+        if _start_menu_lnk().exists():
+            left.append("Start menu shortcut")
+        bindir = os.path.normcase(str(_bin_dir()))
+        if any(os.path.normcase(os.path.expandvars(p).rstrip("\\")) == bindir for p in _user_path_entries()):
+            left.append("`buzz` folder in your PATH")
+        for shim in ("buzz.cmd", "bz.cmd"):
+            if (_bin_dir() / shim).exists():
+                left.append("terminal command file " + shim)
+        return left
+
     def _w_status() -> Dict[str, bool]:
         return {
             "protocol": (_get(_PROTO + r"\shell\open\command") or "") == _protocol_cmd(),
@@ -212,7 +282,10 @@ if IS_WIN:
                 _set(_PROTO + r"\DefaultIcon", "", _icon_ref())
                 _set(_PROTO + r"\shell\open\command", "", _protocol_cmd())
             else:
-                _delete_tree(_PROTO)
+                # Only remove the BZ:// handler if it is ours; another program may own it now.
+                current = (_get(_PROTO + r"\shell\open\command") or "").lower()
+                if not current or "buzzdrop" in current:
+                    _delete_tree(_PROTO)
             _notify_shell()
         elif feature == "context_menu":
             for key in _MENU_KEYS:
@@ -261,6 +334,10 @@ if IS_WIN:
                         (bindir / shim).unlink()
                     except FileNotFoundError:
                         pass
+                try:
+                    bindir.rmdir()          # the folder is ours; remove it once it is empty
+                except OSError:
+                    pass
             kind = winreg.REG_EXPAND_SZ
             _set("Environment", "Path", ";".join(entries), kind)
             _broadcast_env()
@@ -313,6 +390,41 @@ def _linux_icon() -> str:
 
 
 _DESKTOP_ID = "buzzdrop.desktop"
+
+
+def _l_icon_path() -> Path:
+    return _xdg_data() / "icons" / "hicolor" / "256x256" / "apps" / "buzzdrop.png"
+
+
+def _l_mimeapps_files() -> List[Path]:
+    cfg = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return [cfg / "mimeapps.list", _xdg_data() / "applications" / "mimeapps.list"]
+
+
+def _l_remove_extras() -> None:
+    """Things the on/off switches leave behind: the copied icon and the default-app entry for bz://."""
+    try:
+        _l_icon_path().unlink()
+    except OSError:
+        pass
+    for path in _l_mimeapps_files():
+        try:
+            lines = path.read_text("utf-8").splitlines()
+        except OSError:
+            continue
+        out = []
+        for line in lines:
+            if line.startswith("x-scheme-handler/bz="):
+                rest = [t for t in line.split("=", 1)[1].split(";") if t and t != _DESKTOP_ID]
+                if not rest:
+                    continue
+                line = "x-scheme-handler/bz=" + ";".join(rest) + ";"
+            out.append(line)
+        if out != lines:
+            try:
+                path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+            except OSError:
+                pass
 
 
 def _l_paths() -> Dict[str, Path]:
@@ -482,6 +594,7 @@ def setup_defaults() -> List[str]:
                 done.append(feature)
             except IntegrationError as exc:
                 log.warning("first-run %s failed: %s", feature, exc)
+    register_uninstall_entry()   # lists BuzzDrop under Settings → Apps (packaged Windows app only)
     return done
 
 
@@ -508,12 +621,83 @@ def heal() -> None:
             set_feature("cli", True)
     except (OSError, IntegrationError):
         pass
+    try:  # keep the "Apps" entry pointing at the current exe and version
+        if is_frozen() and _key_exists(_UNINSTALL) and not _w_uninstall_entry_current():
+            _w_register_uninstall()
+    except OSError:
+        pass
+
+
+def register_uninstall_entry(force: bool = False) -> bool:
+    """Windows: list BuzzDrop under Settings → Apps so people can remove it the usual way.
+
+    Only for the packaged app (``force`` is for tests) and never in portable mode, which leaves no traces.
+    """
+    from .config import is_portable
+    if not IS_WIN or not (force or is_frozen()) or is_portable():
+        return False
+    try:
+        _w_register_uninstall()
+        return True
+    except OSError as exc:
+        log.warning("could not add the Apps entry: %s", exc)
+        return False
+
+
+def unregister_uninstall_entry() -> None:
+    if IS_WIN:
+        _delete_tree(_UNINSTALL)
+
+
+def uninstall_entry_present() -> bool:
+    return bool(IS_WIN and _key_exists(_UNINSTALL))
+
+
+def forget_traces(exe: Path) -> None:
+    """Remove Windows' bookkeeping about *exe* (display-name cache, compatibility records)."""
+    if IS_WIN:
+        try:
+            _w_forget_traces(Path(exe))
+        except OSError as exc:
+            log.debug("could not clear traces: %s", exc)
+
+
+def leftovers() -> List[str]:
+    """Everything BuzzDrop set up that is still in place (empty list = nothing left to remove)."""
+    try:
+        if IS_WIN:
+            return _w_leftovers()
+        p = _l_paths()
+        found = []
+        labels = {"desktop": "app-menu entry", "nautilus": "Nautilus right-click script",
+                  "nemo": "Nemo right-click action", "dolphin": "Dolphin right-click action",
+                  "cli": "`buzz` command"}
+        for key, label in labels.items():
+            if p[key].exists():
+                found.append(label)
+        if _l_icon_path().exists():
+            found.append("copied icon")
+        for path in _l_mimeapps_files():
+            try:
+                if _DESKTOP_ID in path.read_text("utf-8"):
+                    found.append("default-app entry for bz:// links")
+                    break
+            except OSError:
+                pass
+        return found
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("leftover scan failed: %s", exc)
+        return []
 
 
 def remove_all() -> None:
+    """Undo every integration (BZ:// links, right-click menu, shortcut, `buzz` command, start-at-login)."""
     for feature, ok in supported().items():
         if ok:
             try:
                 set_feature(feature, False)
             except IntegrationError:
                 pass
+    unregister_uninstall_entry()
+    if not IS_WIN and not IS_MAC:
+        _l_remove_extras()

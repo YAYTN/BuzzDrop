@@ -18,7 +18,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional
 
-from .. import APP_ID, APP_NAME, REPO_URL, __version__, integration, updater
+from .. import APP_ID, APP_NAME, REPO_URL, __version__, integration, uninstall, updater
 from ..config import History, apply_history_policy, data_dir, download_dir, load_settings, save_settings
 from ..desktop import check_for_update, notify as desktop_notify, system_prefers_dark
 from ..transfers import CANCELLED, DONE, FAILED, QUEUED, RECEIVE, RUNNING, SEND, Job, TransferManager, describe
@@ -427,6 +427,7 @@ class App:
         self._update_applied = False
         self._update_silent = False
         self._can_update = None
+        self._uninstalling: Optional[dict] = None   # set by "Uninstall…"; the files go at the very end of quit()
         self.suggested: set = set()
         self._last_clip = None
         self._clip_check = 0.0
@@ -797,6 +798,37 @@ class App:
                 self.root.clipboard_clear()
         except tk.TclError:
             pass  # empty, or not text any more: leave it alone
+
+    # -------------------------------------------------------------- uninstall
+    def uninstall_flow(self) -> None:
+        """Settings → Uninstall…: explain, ask, undo the integrations now, delete the files as the app exits."""
+        plan = "\n".join("• " + i for i in uninstall.describe())
+        title = "Uninstall %s" % APP_NAME
+        if not messagebox.askyesno(title, "This will remove:\n\n%s\n\n%s\n\nUninstall %s?"
+                                   % (plan, uninstall.NOT_TOUCHED, APP_NAME), parent=self.root):
+            return
+        delete_data = messagebox.askyesno(
+            title, "Also delete your settings and history?\n\nChoose No to keep them, for example if you plan to "
+            "install %s again." % APP_NAME, parent=self.root)
+        if self.manager.busy and not messagebox.askyesno(
+                APP_NAME, "Transfers are still running.\nCancel them and uninstall?", icon="warning",
+                parent=self.root):
+            return
+        done, problems = uninstall.remove_integrations(uninstall.this_program())
+        self._uninstalling = {"keep_data": not delete_data, "done": done, "problems": problems}
+        self.quit()
+
+    def _finish_uninstall(self) -> None:
+        """Runs at the very end of quit(), when nothing will write settings or logs any more."""
+        u = self._uninstalling or {}
+        report = uninstall.finish(keep_data=bool(u.get("keep_data")))
+        report.done = list(u.get("done", [])) + report.done
+        report.problems = list(u.get("problems", [])) + report.problems
+        try:
+            (messagebox.showinfo if report.clean else messagebox.showwarning)(
+                "Uninstall %s" % APP_NAME, uninstall.summary(report, bool(u.get("keep_data"))))
+        except tk.TclError:
+            pass
 
     def _auto_open_budget(self) -> bool:
         """At most 3 browser tabs per minute, so a batch of blocked links can't flood the browser."""
@@ -1225,6 +1257,14 @@ class App:
                    command=lambda: open_url(REPO_URL)).pack(side="right")
             return f
         row(card, "Project & support", "Report a bug or suggest a feature.", links_ctrl)
+
+        def uninstall_ctrl(parent):
+            f = tk.Frame(parent, bg=c.surface)
+            Button(f, ui, "Uninstall…", small=True, kind="soft", height=30, bg=c.surface,
+                   command=self.uninstall_flow).pack(side="right")
+            return f
+        row(card, "Uninstall %s" % APP_NAME, "Removes it completely: links, menus, settings and the program "
+            "itself. Downloaded files and shared links are not touched.", uninstall_ctrl)
         tk.Frame(body, bg=c.bg, height=ui.px(16)).pack()
         return frame
 
@@ -1598,6 +1638,9 @@ class App:
 
     def handle_payload(self, msg: Dict[str, Any], initial: bool = False) -> None:
         cmd = msg.get("cmd", "open")
+        if cmd == "quit":          # sent by the uninstaller (token-protected, same user only)
+            self.quit()
+            return
         if cmd == "send" and msg.get("paths"):
             # Explorer starts one process per selected file; gather them for a moment so
             # "send multiple files as one ZIP" and the single-window flow see them together.
@@ -1797,6 +1840,8 @@ class App:
                 self.root.after(50, wait)
             else:
                 self._apply_history_policy(closing=True)   # "forget on quit", after cancelled transfers settled
+                if self._uninstalling is not None:
+                    self._finish_uninstall()               # delete settings + program, now that nothing writes
                 self.root.destroy()
         wait()
 

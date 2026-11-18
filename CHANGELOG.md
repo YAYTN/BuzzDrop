@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+### Easy, complete uninstall
+- **Settings → About → Uninstall…**, or **Settings → Apps → BuzzDrop → Uninstall** in Windows, or `buzz uninstall` in a terminal. It explains what will be removed, asks whether to keep your settings and history, and then removes everything BuzzDrop set up: `BZ://` links, the right-click menu, the Start menu shortcut, start-at-login, the `buzz` command and its PATH entry, the entry in Settings → Apps, Windows' own bookkeeping about the program, any unfinished update files, your settings and history (if you choose), and finally the program file itself.
+- **It proves it:** when it finishes, it scans every place BuzzDrop uses and tells you whether anything is left. The result is part of the message you see.
+- **Careful by design:** only files BuzzDrop created are deleted (the settings folder is cleaned by file name, never wiped), a `BZ://` handler that now belongs to another program is left alone, a running copy in the tray is asked to quit first, and downloaded files and shared links are never touched.
+- BuzzDrop now appears in **Settings → Apps** (packaged Windows app, not in portable mode), so the usual place to look for an uninstaller has one.
+- Switching off the `buzz` command now removes its (empty) folder, and on Linux uninstalling also removes the copied icon and the default-app entry for `bz://`.
+
 ## 1.0.0
 
 First release of BuzzDrop: drop a file, get a link; click a link, get the file.

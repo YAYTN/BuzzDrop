@@ -82,6 +82,7 @@ buzz send FILE_OR_FOLDER...   [--note TEXT] [--zip] [--https] [--no-copy] [--jso
 buzz get  LINK_OR_CODE...     [-o DIR] [--no-extract] [--json]
 buzz setup [--remove]         register / remove BZ:// links, right-click menu, buzz command
 buzz update [--check]         look for a new version and install it (packaged Windows app)
+buzz uninstall [--yes]        remove BuzzDrop completely, then check nothing is left (--keep-data keeps settings)
 buzz                          open the app
 ```
 
@@ -116,7 +117,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 | BZ:// links stopped opening after moving the app | Open the app once from its new location — it re-points the links automatically. |
 | Need logs | **Settings → About → Logs** |
 
-**Uninstall:** switch everything off in *Settings → System integration* (or run `buzz setup --remove`), delete the app, and delete the settings folder listed above.
+**Uninstall:** use **Settings → About → Uninstall…** in the app, **Settings → Apps → BuzzDrop → Uninstall** in Windows, or run `buzz uninstall` in a terminal. It removes everything BuzzDrop set up (links, right-click menu, shortcut, start-at-login, the `buzz` command, your settings and history if you choose, and the program itself), then checks that nothing is left and tells you. Your downloaded files and shared links are never touched. `buzz uninstall --keep-data` keeps your settings and history for a later reinstall.
 
 ## Development
 

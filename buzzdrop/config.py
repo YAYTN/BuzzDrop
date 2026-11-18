@@ -25,6 +25,14 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def is_portable() -> bool:
+    """A ``portable`` file next to the packaged exe means: keep everything beside it, leave no traces."""
+    if not is_frozen():
+        return False
+    exe_dir = Path(sys.executable).resolve().parent
+    return (exe_dir / "portable").exists() or (exe_dir / "portable.txt").exists()
+
+
 def data_dir() -> Path:
     """Where settings, history and logs live.
 

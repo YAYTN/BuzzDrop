@@ -43,6 +43,9 @@ Usage:
       --json                      Machine-readable output
   buzz setup [--remove]         Register (or remove) BZ:// links, right-click menu, `buzz` command
   buzz update [--check]         Look for a new version and (packaged Windows app) install it
+  buzz uninstall [--yes]        Remove BuzzDrop completely: links, menus, settings, the program itself
+      --keep-data                 Keep your settings and history (for a later reinstall)
+      --keep-program              Leave the program file in place
   buzz --version
 
 Examples:
@@ -288,6 +291,8 @@ def cmd_setup(argv: List[str]) -> int:
         except integration.IntegrationError as exc:
             print("✗ %s: %s" % (label, exc))
             rc = 1
+    if integration.register_uninstall_entry():
+        print("✓ Entry in Settings > Apps (so it can be uninstalled from there)")
     if sup.get("cli"):
         print("Open a new terminal to use `buzz`.")
     return rc
@@ -411,6 +416,36 @@ def cmd_update(argv: List[str]) -> int:
     return 0
 
 
+def cmd_uninstall(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog="buzz uninstall", add_help=True)
+    p.add_argument("--yes", "-y", action="store_true", help="don't ask")
+    p.add_argument("--keep-data", action="store_true", help="keep settings and history")
+    p.add_argument("--keep-program", action="store_true", help="leave the program file in place")
+    a = p.parse_args(argv)
+
+    from . import uninstall
+    print("This will remove:")
+    for item in uninstall.describe(a.keep_data, not a.keep_program):
+        print("  - " + item)
+    print(uninstall.NOT_TOUCHED)
+    if not a.yes:
+        if not (sys.stdin and sys.stdin.isatty()):
+            print("Not an interactive terminal: add --yes to confirm.", file=sys.stderr)
+            return 2
+        try:
+            answer = input("Type 'yes' to uninstall: ")
+        except (EOFError, KeyboardInterrupt):   # e.g. Windows reports an empty input device as a terminal
+            print("\nNo answer received: add --yes to confirm.", file=sys.stderr)
+            return 2
+        if answer.strip().lower() != "yes":
+            print("Cancelled.")
+            return 1
+    report = uninstall.run_all(keep_data=a.keep_data, remove_program=not a.keep_program)
+    print()
+    print(uninstall.summary(report, a.keep_data))
+    return 0 if report.clean else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) >= 2 and argv[0] == "--after-update":
@@ -424,7 +459,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .updater import wait_for_exit
             wait_for_exit(pid)
     head = argv[0] if argv else ""
-    commands = {"send": cmd_send, "get": cmd_get, "setup": cmd_setup, "update": cmd_update}
+    commands = {"send": cmd_send, "get": cmd_get, "setup": cmd_setup, "update": cmd_update,
+                "uninstall": cmd_uninstall}
     if head in commands or head in ("-h", "--help", "help", "-V", "--version", "version",
                                     "--install", "--uninstall"):
         _attach_console()
@@ -435,8 +471,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         if head == "--install":
             return cmd_setup([])
-        if head == "--uninstall":
-            return cmd_setup(["--remove"])
+        if head == "--uninstall":   # what Settings > Apps > Uninstall runs: a small confirmation window
+            from .uninstall import run_dialog
+            return run_dialog()
         print(HELP % {"app": APP_NAME, "ver": __version__})
         return 0
     return launch_gui(argv)

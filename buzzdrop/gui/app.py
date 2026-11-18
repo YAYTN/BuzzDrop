@@ -790,6 +790,17 @@ class App:
         except tk.TclError:
             pass  # empty, or not text any more: leave it alone
 
+    def _auto_open_budget(self) -> bool:
+        """At most 3 browser tabs per minute, so a batch of blocked links can't flood the browser."""
+        now = time.monotonic()
+        recent = [t for t in getattr(self, "_auto_opens", []) if now - t < 60]
+        if len(recent) >= 3:
+            self._auto_opens = recent
+            return False
+        recent.append(now)
+        self._auto_opens = recent
+        return True
+
     def copy_link(self, code: str) -> None:
         link = share_link(code, self.settings.get("link_style", "bz"))
         if self.copy(link):
@@ -1452,10 +1463,17 @@ class App:
                        action=("Show", lambda: self.reveal(target)))
             self.notify("Download complete", os.path.basename(target or ""))
         elif job.state == FAILED:
-            action = (("Open in browser", lambda: open_url(web_link(job.code))) if job.blocked
-                      else ("Retry", lambda: self.retry(job)))
-            self.toast("%s — %s" % (job.error_title or "Failed", job.error or ""), "error", action=action, duration=7000)
-            self.notify(job.error_title or "Transfer failed", job.error or job.label)
+            if job.blocked and self._auto_open_budget():
+                # BuzzHeavier wants a real browser for this file: hand it over right away.
+                open_url(web_link(job.code))
+                self.toast("BuzzHeavier asked for a browser check — opened the link in your browser.", "info",
+                           action=("Open again", lambda: open_url(web_link(job.code))), duration=7000)
+            else:
+                action = (("Open in browser", lambda: open_url(web_link(job.code))) if job.blocked
+                          else ("Retry", lambda: self.retry(job)))
+                self.toast("%s — %s" % (job.error_title or "Failed", job.error or ""), "error", action=action,
+                           duration=7000)
+                self.notify(job.error_title or "Transfer failed", job.error or job.label)
         self._hist_dirty = True
         if self.page == "history" and not self.in_settings:
             self._render_history()

@@ -96,7 +96,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 
 - Uploads use BuzzHeavier's [public API](https://buzzheavier.com/developers) (`PUT https://w.buzzheavier.com/<name>`), streamed from disk — memory use stays flat for any file size.
 - Downloads open the public page for the code, follow its signed download link and stream to `name.part`, which is renamed only when complete.
-- BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/2.x`). If BuzzHeavier asks for a browser check, the app says so and offers **Open in browser** instead of trying to get around it.
+- BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/2.x`). BuzzHeavier sometimes asks programs that aren't browsers to pass a browser check. BuzzDrop never tries to get around that: it opens the file's page in your own browser for you (a download there works as usual), and the **Open in browser** button stays on the transfer in case you closed the tab.
 - The only other connection is a once-a-day look at this repo's latest GitHub release (switch off in Settings).
 - Settings, history and logs live in `%LOCALAPPDATA%\BuzzDrop` (Windows), `~/Library/Application Support/BuzzDrop` (macOS) or `~/.config/buzzdrop` (Linux).
 
@@ -105,7 +105,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 | Problem | Fix |
 |---|---|
 | The hotkey does nothing | Another app owns it — BuzzDrop tells you; pick a new one in **Settings → Global hotkey**. |
-| “Open in your browser” error | BuzzHeavier wanted a browser check for that file. Click **Open in browser**. |
+| “Open in your browser” error | BuzzHeavier wanted a browser check for that file. BuzzDrop opens it in your browser for you; if you closed the tab, click **Open in browser** on the transfer. |
 | Linux from source: “needs Tk” | `sudo apt install python3-tk` (Debian/Ubuntu) or `sudo dnf install python3-tkinter` (Fedora). The prebuilt binary already includes it. |
 | macOS from source: “needs Tk 8.6” | Apple's built-in Python ships an old Tk — use the packaged app or Python from python.org. |
 | BZ:// links stopped opening after moving the app | Open the app once from its new location — it re-points the links automatically. |

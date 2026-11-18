@@ -89,6 +89,37 @@ class GuiEndToEnd(unittest.TestCase):
             except tk.TclError:
                 pass  # quit() already destroyed the window
 
+    def test_blocked_download_opens_the_browser_instead_of_bypassing(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A
+        from buzzdrop.transfers import FAILED
+
+        self.srv.add_file("blocked00001", "x.bin", b"x")
+        self.srv.challenge = True            # BuzzHeavier answers with a browser check
+        opened = []
+        real_open = A.open_url
+        A.open_url = opened.append
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            app.receive_codes(["blocked00001"])
+            self.assertTrue(self._pump(root, lambda: any(j.state == FAILED for j in app.manager.jobs)))
+            self.assertTrue(self._pump(root, lambda: len(opened) == 1))
+            self.assertTrue(opened[0].endswith("/blocked00001"))
+            self.assertEqual(self.srv.download_requests, [])   # we never tried to get around the check
+            for _ in range(5):   # a flood of blocked links opens at most 3 tabs a minute
+                app._auto_open_budget()
+            self.assertFalse(app._auto_open_budget())
+        finally:
+            A.open_url = real_open
+            app.quit()
+            try:
+                self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
     def test_colour_change_swaps_in_one_complete_page(self):
         import tkinter as tk
         from buzzdrop.gui import app as A

@@ -229,7 +229,8 @@ class InstallTests(unittest.TestCase):
 
 class CommandTests(UpdaterBase):
     def _run(self, *args):
-        env = dict(os.environ, BUZZ_DATA_DIR=str(self.dir / "data"), BUZZ_NO_INTEGRATION="1")
+        env = dict(os.environ, BUZZ_DATA_DIR=str(self.dir / "data"), BUZZ_NO_INTEGRATION="1",
+                   PYTHONIOENCODING="utf-8")
         return subprocess.run([sys.executable, str(ROOT / "BuzzDrop.pyw"), *args], capture_output=True, text=True,
                               timeout=60, env=env, encoding="utf-8", errors="replace")
 

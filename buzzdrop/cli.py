@@ -32,7 +32,7 @@ Usage:
   buzz send FILE... [options]   Upload files/folders and print the link(s)
       --note TEXT                 Note shown on the download page
       --zip                       Bundle everything into one ZIP (one link)
-      --https                     Print https://buzzheavier.com/… links instead of BZ://
+      --https                     Print https://buzzheavier.com/... links instead of BZ://
       --no-copy                   Don't copy the link(s) to the clipboard
       --split MB                  Optional: send files bigger than MB in separate parts, each
                                   retried alone (also prints a plain link for every part)

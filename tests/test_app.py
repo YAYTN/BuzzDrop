@@ -176,7 +176,9 @@ class LauncherParsing(unittest.TestCase):
 
 class CliTests(TempData):
     def _run(self, *args, env_extra=None):
-        env = dict(os.environ, BUZZ_DATA_DIR=self.tmp.name, PYTHONPATH=str(ROOT))
+        # The child must write UTF-8 because this test decodes it as UTF-8; on Windows a pipe would
+        # otherwise use the legacy code page (cp1252), which is what broke this on GitHub's runners.
+        env = dict(os.environ, BUZZ_DATA_DIR=self.tmp.name, PYTHONPATH=str(ROOT), PYTHONIOENCODING="utf-8")
         env.update(env_extra or {})
         return subprocess.run([sys.executable, "-m", "buzzdrop", *args], capture_output=True, text=True,
                               env=env, timeout=60, cwd=str(ROOT), encoding="utf-8")

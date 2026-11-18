@@ -30,6 +30,8 @@ Tiny (~12 MB) · zero dependencies · Windows · macOS · Linux
 | **Linux** (x86-64) | [`BuzzDrop-linux-x86_64`](https://github.com/YAYTN/BuzzDrop/releases/latest) | `chmod +x BuzzDrop-linux-x86_64 && ./BuzzDrop-linux-x86_64` |
 | **Anything with Python 3.9+** (Intel Macs, ARM Linux, …) | `pipx install git+https://github.com/YAYTN/BuzzDrop` | Run `buzzdrop` (app) or `buzz` (terminal) — or download the source and double-click **`BuzzDrop.pyw`**. |
 
+*The Windows and Linux apps are tested automatically. The macOS app is built the same way but hasn't been tried on a real Mac yet; please [report](https://github.com/YAYTN/BuzzDrop/issues) anything that doesn't work.*
+
 On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send with BuzzDrop”** to your right-click menu. Everything is per-user (no admin) and can be switched off in **Settings → System integration**.
 ## Features
 
@@ -97,6 +99,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 ## How it works & privacy
 
 - Uploads use BuzzHeavier's [public API](https://buzzheavier.com/developers) (`PUT https://w.buzzheavier.com/<name>`), streamed from disk — memory use stays flat for any file size.
+- Files sent without an account don't stay forever: BuzzHeavier removes them after a few days (it reported about four days when this was written, and BuzzHeavier can change that). Share the link soon after uploading, and send the file again if a link has expired.
 - Downloads open the public page for the code, follow its signed download link and stream to `name.part`, which is renamed only when complete.
 - BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/2.x`). BuzzHeavier sometimes asks programs that aren't browsers to pass a browser check. BuzzDrop never tries to get around that or pretends to be a browser: the transfer shows an **Open in browser** button (a download there works as usual), and an optional setting opens the page for you automatically.
 - The only other connection is a once-a-day look at this repo's latest GitHub release (switch off in Settings).

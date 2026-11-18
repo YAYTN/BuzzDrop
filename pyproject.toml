@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "buzzdrop"
+dynamic = ["version"]
+description = "Send & receive files with BuzzHeavier — tiny, cross-platform, zero dependencies."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "YAYTN" }]
+keywords = ["buzzheavier", "file-sharing", "upload", "download", "transfer"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications :: File Sharing",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/YAYTN/BuzzDrop"
+Issues = "https://github.com/YAYTN/BuzzDrop/issues"
+
+[project.scripts]
+buzz = "buzzdrop.cli:main"
+
+[project.gui-scripts]
+buzzdrop = "buzzdrop.cli:main_gui"
+
+[tool.setuptools]
+packages = ["buzzdrop", "buzzdrop.gui"]
+
+[tool.setuptools.package-data]
+buzzdrop = ["assets/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "buzzdrop.__version__" }

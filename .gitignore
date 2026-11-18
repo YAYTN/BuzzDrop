@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Runtime
+*.log
+*.tmp
+
+# Personal data — never upload (BuzzDrop keeps these in your user folder; portable mode uses ./data)
+data/
+portable
+config.json
+history.json
+instance.json
+instance.lock

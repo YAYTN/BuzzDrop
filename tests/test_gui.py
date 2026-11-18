@@ -1,0 +1,160 @@
+"""End-to-end GUI test against the mock server. Opens a (transparent) window, so it
+only runs when BUZZ_GUI_TESTS=1:
+
+    BUZZ_GUI_TESTS=1 python -m unittest tests.test_gui
+"""
+
+import json
+import os
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from .mockserver import MockBuzz
+
+
+@unittest.skipUnless(os.environ.get("BUZZ_GUI_TESTS") == "1", "set BUZZ_GUI_TESTS=1 to run GUI tests")
+class GuiEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.srv = MockBuzz()
+        self.env_backup = dict(os.environ)
+        os.environ.update(BUZZ_DATA_DIR=self.tmp.name, BUZZ_NO_INTEGRATION="1",
+                          BUZZ_BASE_URL=self.srv.url, BUZZ_UPLOAD_URL=self.srv.url)
+        self.dl = Path(self.tmp.name) / "downloads"
+        Path(self.tmp.name, "config.json").write_text(json.dumps({
+            "integration_setup_done": True, "enable_global_hotkey": False, "watch_clipboard": False,
+            "check_for_updates": False, "copy_link": False, "launch_folder_after_download": False,
+            "notifications": False, "download_folder": str(self.dl), "theme": "dark"}))
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.env_backup)
+        self.srv.stop()
+        self.tmp.cleanup()
+
+    def _pump(self, root, cond, timeout=15.0):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            root.update()
+            if cond():
+                return True
+            time.sleep(0.02)
+        return False
+
+    def test_send_receive_drop_and_rebuild(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A
+        from buzzdrop.transfers import DONE, RECEIVE, SEND
+
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            src = Path(self.tmp.name) / "report final.pdf"
+            src.write_bytes(os.urandom(1_500_000))
+            app.send_paths([str(src)])
+            self.assertTrue(self._pump(root, lambda: any(j.state == DONE and j.kind == SEND for j in app.manager.jobs)))
+            code = next(j.result["code"] for j in app.manager.jobs if j.kind == SEND)
+            self.assertEqual(self.srv.uploads[-1]["data"], src.read_bytes())
+
+            app.receive_codes([code])
+            self.assertTrue(self._pump(root, lambda: any(j.state == DONE and j.kind == RECEIVE for j in app.manager.jobs)))
+            self.assertEqual((self.dl / "report final.pdf").read_bytes(), src.read_bytes())
+            # history is written when the UI loop picks up the finished job
+            self.assertTrue(self._pump(root, lambda: len(app.history.items) == 2))
+            self.assertEqual([e["kind"] for e in app.history.items], ["receive", "send"])
+
+            app.show_page("history")
+            root.update()
+            app.open_settings()
+            root.update()
+            app.rebuild(settings_open=True)  # theme switch path
+            root.update()
+            self.assertTrue(app.in_settings)
+            app.close_settings()
+            self.assertEqual(len(app.rows), 2)
+
+            if sys.platform == "win32":
+                self._simulate_drop(root, app, src)
+                self.assertTrue(self._pump(root, lambda: sum(j.kind == SEND for j in app.manager.jobs) == 2))
+                self.assertTrue(self._pump(root, lambda: not app.manager.busy))
+        finally:
+            app.quit()
+            try:
+                self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass  # quit() already destroyed the window
+
+    def test_colour_change_swaps_in_one_complete_page(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A
+
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            root.update()
+            before = sorted(type(w).__name__ for w in root.winfo_children())
+            app.note.set("keep me")
+            app._save("accent", "blue")
+            app.rebuild()
+            root.update()
+            self.assertEqual(app.ui.c.accent, "#5b8def")
+            self.assertEqual(sorted(type(w).__name__ for w in root.winfo_children()), before)  # no leftovers
+            self.assertEqual((app.host.winfo_x(), app.host.winfo_width(), app.host.winfo_height()),
+                             (0, root.winfo_width(), root.winfo_height()))  # fills the window exactly
+            self.assertEqual(app.note.get(), "keep me")
+            app.open_settings()
+            root.update()
+            app._save("palette", "ocean")
+            app.rebuild(settings_open=True)
+            root.update()
+            self.assertTrue(app.in_settings and app.settings_frame.winfo_ismapped())
+            # Settings keeps its scroll position when a colour is changed from the bottom of the page.
+            area = app._settings_area
+            area.canvas.yview_moveto(0.7)
+            root.update()
+            was = area.canvas.yview()[0]
+            self.assertGreater(was, 0.3)
+            app._save("accent", "rose")
+            app.rebuild(settings_open=True)
+            root.update()
+            self.assertAlmostEqual(app._settings_area.canvas.yview()[0], was, delta=0.02)
+            self.assertEqual(app.ui.c.accent, "#e0698f")
+            for _ in range(4):  # rapid theme toggles never stack up pages
+                app.toggle_theme()
+                root.update()
+            self.assertEqual(sorted(type(w).__name__ for w in root.winfo_children()), before)
+        finally:
+            app.quit()
+            try:
+                self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
+    def _simulate_drop(self, root, app, path):
+        import ctypes
+        from ctypes import wintypes
+        from buzzdrop import winsys
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GlobalAlloc.restype = ctypes.c_void_p
+        k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        k32.GlobalLock.restype = ctypes.c_void_p
+        k32.GlobalLock.argtypes = [ctypes.c_void_p]
+        k32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        files = (str(path) + "\0\0").encode("utf-16-le")
+        header = (20).to_bytes(4, "little") + b"\0" * 8 + (0).to_bytes(4, "little") + (1).to_bytes(4, "little")
+        h = k32.GlobalAlloc(0x0042, len(header) + len(files))
+        p = k32.GlobalLock(h)
+        ctypes.memmove(p, header + files, len(header) + len(files))
+        k32.GlobalUnlock(h)
+        winsys.user32.PostMessageW(app.drop.hwnd, winsys.WM_DROPFILES, h, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

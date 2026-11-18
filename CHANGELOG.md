@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 1.1.3
+
+- **Deleting the program by hand no longer leaves a mess (Windows):** the right-click menu, BZ:// links, start-at-login and the Settings > Apps entry now start BuzzDrop through a tiny script (`guard.js` in the settings folder, run by Windows' own script host, no window). If BuzzDrop is there, it just starts as before. If someone deleted it, the first click removes those leftover entries, the Start menu shortcut and the `buzz` command files, shows one short message, and deletes the script. Settings and history are left alone. Existing installs switch over by themselves the first time the new version runs; a normal uninstall removes the script too.
+
 ## 1.1.2
 
 - **Uninstall can't get stuck any more:** the final "BuzzDrop has been removed" message could open behind other windows. Until someone clicked it, BuzzDrop stayed in the Task Manager and its file could not be deleted, and the cleanup gave up after about 90 seconds. The message is now always on top, closes itself after a minute, the program is forced to end right after, and the cleanup keeps trying for 15 minutes.

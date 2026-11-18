@@ -1,4 +1,4 @@
-"""The uninstaller: it must undo everything BuzzDrop sets up, touch nothing else, and prove it."""
+﻿"""The uninstaller: it must undo everything BuzzDrop sets up, touch nothing else, and prove it."""
 
 import logging
 import os
@@ -181,6 +181,98 @@ class WindowsSandbox(unittest.TestCase):
         integration.unregister_uninstall_entry()
         self.assertFalse(integration.uninstall_entry_present())
 
+    # ---- the guard: entries that survive a hand-deleted exe clean themselves up -------------------------
+    def _frozen_as(self, exe: Path):
+        """Pretend to be the packaged app living at *exe* (which need not exist)."""
+        return mock.patch.multiple(integration, is_frozen=lambda: True), mock.patch.object(sys, "executable", str(exe))
+
+    def _guard_run(self, exe: Path, mode: str, *args):
+        return subprocess.run(["wscript.exe", "//Nologo", "//E:JScript", str(integration._guard_path()),
+                               str(exe), self.prefix, mode, *args], timeout=60)
+
+    def test_packaged_entries_go_through_the_guard_and_are_fully_removable(self):
+        t = Path(self.tmp.name)
+        a, b = self._frozen_as(t / "BuzzDrop.exe")
+        with a, b:
+            self._install_everything()
+            for cmd in (integration._protocol_cmd(), integration._menu_cmd(), integration._autostart_cmd(),
+                        integration._get(integration._UNINSTALL, "UninstallString")):
+                self.assertTrue(cmd.startswith("wscript.exe //Nologo //E:JScript "), cmd)
+                self.assertIn(str(integration._guard_path()), cmd)
+            self.assertTrue(integration._guard_path().exists())
+            self.assertIn("helper script guard.js", integration.leftovers())
+            self.assertEqual(integration.status()["protocol"], True)
+            uninstall.remove_integrations(None)
+            self.assertEqual(integration.leftovers(), [])                  # the guard file is removed too
+            self.assertFalse(integration._guard_path().exists())
+
+    def test_when_the_exe_is_gone_the_entries_remove_themselves(self):
+        t = Path(self.tmp.name)
+        gone = t / "Program" / "BuzzDrop.exe"                              # never exists
+        a, b = self._frozen_as(gone)
+        with a, b:
+            self._install_everything()
+            self.assertTrue(integration.leftovers())
+            r = self._guard_run(gone, "run")                               # like clicking a dead entry (silent mode)
+            self.assertEqual(r.returncode, 0)
+            left = [x for x in integration.leftovers() if "PATH" not in x]  # a PATH entry for a missing folder is harmless
+            self.assertEqual(left, [])
+            self.assertFalse(integration._guard_path().exists())          # it removes itself last
+            self.assertEqual(self._real_state(), self.real_before)
+
+    def test_an_older_install_switches_to_the_guard_by_itself(self):
+        """1.1.2 and older registered the exe directly; the first run of the new version re-points them."""
+        t = Path(self.tmp.name)
+        for feature in ("protocol", "context_menu", "autostart"):
+            integration.set_feature(feature, True)                         # from source: direct, no guard
+        integration.register_uninstall_entry(force=True)
+        self.assertFalse(integration._guard_path().exists())
+        a, b = self._frozen_as(t / "BuzzDrop.exe")
+        with a, b:
+            integration.heal()
+            self.assertTrue(integration._guard_path().exists())
+            for cmd in (integration._get(integration._PROTO + r"\shell\open\command"),
+                        integration._get(integration._MENU_KEYS[0] + r"\command"),
+                        integration._get(integration._RUN, "BuzzDrop"),
+                        integration._get(integration._UNINSTALL, "UninstallString")):
+                self.assertIn("guard.js", cmd)
+            self.assertEqual(integration._get(integration._RUN, "BuzzDrop"), integration._autostart_cmd())
+
+    def test_another_programs_bz_handler_survives_the_cleanup(self):
+        t = Path(self.tmp.name)
+        gone = t / "BuzzDrop.exe"
+        a, b = self._frozen_as(gone)
+        with a, b:
+            self._install_everything()
+            theirs = '"C:\\Other\\App.exe" --protocol "%1"'
+            integration._set(integration._PROTO + r"\shell\open\command", "", theirs)
+            self._guard_run(gone, "run")
+            self.assertEqual(integration._get(integration._PROTO + r"\shell\open\command"), theirs)
+
+    def test_when_the_exe_exists_the_guard_starts_it_with_every_argument_intact(self):
+        t = Path(self.tmp.name)
+        real_python = sys.executable                                       # stands in for BuzzDrop.exe
+        a, b = self._frozen_as(t / "BuzzDrop.exe")
+        with a, b:
+            integration._write_guard()
+            flag = t / "flag.txt"
+            code = "import sys; open(sys.argv[1], 'w', encoding='utf-8').write(repr(sys.argv[2:]))"
+            # (a file name cannot contain a quote, so that case is not part of "real" arguments)
+            tricky = ['two words', 'D:\\folder\\', 'D:\\a b\\c d\\', 'unicode-\u00e9\u4e2d', '--send']
+            # Written like the registry entries are: every argument simply wrapped in quotes (Windows' script host
+            # reads backslashes literally, so "D:\folder\" is the text D:\folder\ ).
+            quoted = " ".join('"%s"' % x for x in [str(integration._guard_path()), real_python, self.prefix, "menu",
+                                                   "-c", code, str(flag), *tricky])
+            r = subprocess.run("wscript.exe //Nologo //E:JScript " + quoted, timeout=60)
+            self.assertEqual(r.returncode, 0)
+            import time
+            end = time.time() + 20
+            while time.time() < end and not flag.exists():
+                time.sleep(0.2)
+            time.sleep(0.3)
+            self.assertEqual(flag.read_text(encoding="utf-8"), repr(tricky))
+            self.assertTrue(integration._guard_path().exists())           # a working install keeps its guard
+
     def test_another_programs_bz_handler_is_left_alone(self):
         theirs = '"C:\\Other\\App.exe" --protocol "%1"'
         integration._set(integration._PROTO + r"\shell\open\command", "", theirs)
@@ -206,8 +298,8 @@ class WindowsSandbox(unittest.TestCase):
         (data / "history.json").write_text("[]")
         r = self._run_cli("uninstall", "--yes", "--keep-program", "--keep-data")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(integration.leftovers(), [])                      # integrations are gone …
-        self.assertTrue((data / "history.json").exists())                  # … but the data was kept
+        self.assertEqual(integration.leftovers(), [])                      # integrations are gone â€¦
+        self.assertTrue((data / "history.json").exists())                  # â€¦ but the data was kept
         self.assertFalse((data / "bin").exists())                          # (the buzz command files are not "data")
 
 

@@ -4,7 +4,7 @@ Pure standard-library Python: no third-party packages are required to run
 the app, the CLI or the tests.
 """
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 APP_NAME = "BuzzDrop"
 APP_ID = "BuzzDrop.App"

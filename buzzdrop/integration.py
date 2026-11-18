@@ -173,10 +173,117 @@ if IS_WIN:
     def _icon_ref() -> str:
         return (str(Path(sys.executable).resolve()) + ",0") if is_frozen() else str(icon_path("ico"))
 
+    # The "guard": the packaged app's registry entries do not start the exe directly but through this tiny
+    # script (run by Windows' own script host, no window). If the exe is there it simply starts it; if
+    # somebody deleted the exe by hand, it removes BuzzDrop's now-dead entries instead of showing errors.
+    _GUARD_JS = r'''// BuzzDrop guard. Written by BuzzDrop; safe to delete (BuzzDrop recreates it when it runs).
+var sh = new ActiveXObject("WScript.Shell");
+var fso = new ActiveXObject("Scripting.FileSystemObject");
+var A = WScript.Arguments;
+
+function q(s) {
+  s = String(s).replace(/(\\*)"/g, '$1$1\\"');
+  s = s.replace(/(\\+)$/, "$1$1");
+  return '"' + s + '"';
+}
+
+if (A.length < 3) WScript.Quit(2);
+var exe = A(0), pre = A(1), mode = A(2);
+
+if (fso.FileExists(exe)) {
+  var cmd = q(exe);
+  for (var i = 3; i < A.length; i++) cmd += " " + q(A(i));
+  try { sh.Run(cmd, 1, false); } catch (e) {}
+  WScript.Quit(0);
+}
+
+// The program file is gone: tidy up what pointed at it.
+var base = "HKCU\\" + (pre ? pre + "\\" : "");
+function delKey(p) { try { sh.RegDelete(base + p + "\\"); } catch (e) {} }
+function delValue(p) { try { sh.RegDelete(base + p); } catch (e) {} }
+function readKey(p) { try { return String(sh.RegRead(base + p + "\\")); } catch (e) { return ""; } }
+function ours(s) { s = s.toLowerCase(); return s.indexOf("buzzdrop") >= 0 || s.indexOf("guard.js") >= 0; }
+
+var proto = "Software\\Classes\\bz";
+var cur = readKey(proto + "\\shell\\open\\command");
+if (cur === "" || ours(cur)) {
+  delKey(proto + "\\shell\\open\\command"); delKey(proto + "\\shell\\open"); delKey(proto + "\\shell");
+  delKey(proto + "\\DefaultIcon"); delKey(proto);
+}
+var bases = ["*", "Directory"];
+for (var b = 0; b < bases.length; b++) {
+  var m = "Software\\Classes\\" + bases[b] + "\\shell\\BuzzDrop.Send";
+  delKey(m + "\\command"); delKey(m);
+}
+delValue("Software\\Microsoft\\Windows\\CurrentVersion\\Run\\BuzzDrop");
+delKey("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BuzzDrop");
+
+try {
+  var lnk = sh.ExpandEnvironmentStrings("%APPDATA%") + "\\Microsoft\\Windows\\Start Menu\\Programs\\BuzzDrop.lnk";
+  if (fso.FileExists(lnk)) fso.DeleteFile(lnk, true);
+} catch (e) {}
+var dataDir = fso.GetParentFolderName(WScript.ScriptFullName);
+try {
+  var bin = dataDir + "\\bin";
+  if (fso.FolderExists(bin)) {
+    var names = ["buzz.cmd", "bz.cmd"];
+    for (var n = 0; n < names.length; n++) { if (fso.FileExists(bin + "\\" + names[n])) fso.DeleteFile(bin + "\\" + names[n], true); }
+    if (fso.GetFolder(bin).Files.Count === 0 && fso.GetFolder(bin).SubFolders.Count === 0) fso.DeleteFolder(bin, true);
+  }
+} catch (e) {}
+
+if (mode !== "run") {
+  try {
+    sh.Popup("BuzzDrop has been deleted from this PC, so its leftover entries (right-click menu, links, " +
+             "Settings > Apps) were just removed. Nothing else is needed.\n\nYour settings and history are still in:\n" +
+             dataDir + "\nYou can delete that folder if you don't need them.", 120, "BuzzDrop", 64);
+  } catch (e) {}
+}
+try { fso.DeleteFile(WScript.ScriptFullName, true); } catch (e) {}
+'''
+
+    def _guard_path() -> Path:
+        return data_dir() / "guard.js"
+
+    def _guarded() -> bool:
+        """Only the packaged exe goes through the guard; running from source starts Python directly."""
+        return is_frozen()
+
+    def _write_guard() -> None:
+        """Create (or refresh) the guard script. Cheap; called whenever an entry that uses it is written."""
+        if not _guarded():
+            return
+        path = _guard_path()
+        try:
+            if path.exists() and path.read_text("ascii", "replace") == _GUARD_JS:
+                return
+        except OSError:
+            pass
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(_GUARD_JS.encode("ascii"))
+
+    def _remove_guard() -> None:
+        try:
+            _guard_path().unlink()
+        except OSError:
+            pass
+
+    def _cmd_for(rest: str, mode: str) -> str:
+        """The command line for a registry entry: the app itself (from source), or the app through the guard."""
+        if not _guarded():
+            return _cmdline(launch_command()) + (" " + rest if rest else "")
+        prefix = os.environ.get("BUZZ_TEST_REG_PREFIX", "").strip("\\")
+        head = "wscript.exe //Nologo //E:JScript " + _cmdline(
+            [str(_guard_path()), str(Path(sys.executable).resolve()), prefix, mode])
+        return head + (" " + rest if rest else "")
+
     def _protocol_cmd() -> str:
         # Everything after --protocol is treated as link text only — a crafted link can't
         # smuggle in `--send C:\secret.txt` even if the launching app mangles the quoting.
-        return _cmdline(launch_command()) + ' --protocol "%1"'
+        return _cmd_for('--protocol "%1"', "protocol")
+
+    def _autostart_cmd() -> str:
+        return _cmd_for("--background", "run")
 
     def _shim_text() -> bytes:
         """buzz.cmd contents, encoded the way cmd.exe reads batch files (OEM code page)."""
@@ -196,7 +303,7 @@ if IS_WIN:
             return ("@echo off\r\n%s %%*\r\n" % _cmdline(short)).encode(enc, "replace")
 
     def _menu_cmd() -> str:
-        return _cmdline(launch_command()) + ' --send "%1"'
+        return _cmd_for('--send "%1"', "menu")
 
     def _start_menu_lnk() -> Path:
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
@@ -215,7 +322,7 @@ if IS_WIN:
         from . import REPO, REPO_URL, __version__
         vals: Dict[str, Any] = {
             "DisplayName": APP_NAME, "DisplayVersion": __version__, "Publisher": REPO.split("/")[0],
-            "DisplayIcon": _icon_ref(), "UninstallString": _cmdline(launch_command()) + " --uninstall",
+            "DisplayIcon": _icon_ref(), "UninstallString": _cmd_for("--uninstall", "uninstall"),
             "URLInfoAbout": REPO_URL,
         }
         if is_frozen():
@@ -223,6 +330,7 @@ if IS_WIN:
         return vals
 
     def _w_register_uninstall() -> None:
+        _write_guard()
         for name, value in _uninstall_values().items():
             _set(_UNINSTALL, name, value)
         _set(_UNINSTALL, "NoModify", 1, winreg.REG_DWORD)
@@ -261,6 +369,8 @@ if IS_WIN:
         for shim in ("buzz.cmd", "bz.cmd"):
             if (_bin_dir() / shim).exists():
                 left.append("terminal command file " + shim)
+        if _guard_path().exists():
+            left.append("helper script guard.js")
         return left
 
     def _w_status() -> Dict[str, bool]:
@@ -275,6 +385,8 @@ if IS_WIN:
         }
 
     def _w_set(feature: str, on: bool) -> None:
+        if on and feature in ("protocol", "context_menu", "autostart"):
+            _write_guard()
         if feature == "protocol":
             if on:
                 _set(_PROTO, "", "URL:BuzzHeavier link")
@@ -343,7 +455,7 @@ if IS_WIN:
             _broadcast_env()
         elif feature == "autostart":
             if on:
-                _set(_RUN, APP_NAME, _cmdline(launch_command()) + " --background")
+                _set(_RUN, APP_NAME, _autostart_cmd())
             else:
                 _delete_value(_RUN, APP_NAME)
 
@@ -602,6 +714,12 @@ def heal() -> None:
     """If the app moved, re-point anything that still references the old location."""
     if not IS_WIN:
         return
+    try:
+        if any((_get(k) for k in (_PROTO + r"\shell\open\command", _MENU_KEYS[0] + r"\command"))) or _get(_RUN, APP_NAME) \
+                or _key_exists(_UNINSTALL):
+            _write_guard()          # the entries may use it; make sure it is there (e.g. after an update)
+    except OSError:
+        pass
     for feature, key in (("protocol", _PROTO + r"\shell\open\command"), ("context_menu", _MENU_KEYS[0] + r"\command")):
         current = _get(key)
         if current and current != (_protocol_cmd() if feature == "protocol" else _menu_cmd()):
@@ -610,7 +728,7 @@ def heal() -> None:
             except IntegrationError:
                 pass
     run = _get(_RUN, APP_NAME)
-    if run and run != _cmdline(launch_command()) + " --background":
+    if run and run != _autostart_cmd():
         try:
             set_feature("autostart", True)
         except IntegrationError:
@@ -699,5 +817,7 @@ def remove_all() -> None:
             except IntegrationError:
                 pass
     unregister_uninstall_entry()
+    if IS_WIN:
+        _remove_guard()
     if not IS_WIN and not IS_MAC:
         _l_remove_extras()

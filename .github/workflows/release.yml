@@ -1,10 +1,12 @@
 name: Release
 
-# Push a tag like v1.0.0 → builds Windows, macOS and Linux apps and attaches
-# them to a GitHub Release. The in-app update checker reads that release.
+# Push a tag like v1.0.0 → builds the apps and attaches them to a GitHub Release.
+# The in-app update checker reads that release.
 #
-# The macOS build is best-effort: GitHub's Mac runners are scarce and often queue or
-# cancel jobs, so a missing macOS app must never stop the Windows/Linux release.
+# Windows and Linux build first and publish the release as soon as they are done.
+# The macOS app is best-effort and separate: GitHub's Mac runners are scarce and often queue
+# for a long time, so it is built in parallel and added to the release afterwards if/when it
+# finishes. Nothing ever waits for it, and cancelling or losing it never affects the release.
 on:
   push:
     tags: ["v*"]
@@ -21,13 +23,9 @@ jobs:
         include:
           - os: windows-latest
             asset: BuzzDrop-windows-x64.exe
-          - os: macos-latest
-            asset: BuzzDrop-macos-apple-silicon.zip
-            best_effort: true
           - os: ubuntu-22.04          # older glibc → runs on more distros
             asset: BuzzDrop-linux-x86_64
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.best_effort == true }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +42,6 @@ jobs:
           python -m pip install pyinstaller==6.11.1
           python packaging/build.py --asset-name ${{ matrix.asset }}
       - name: Smoke test
-        if: runner.os != 'macOS'
         shell: bash
         run: |
           chmod +x dist/${{ matrix.asset }} || true
@@ -56,8 +53,7 @@ jobs:
 
   release:
     needs: build
-    # Run even if the best-effort macOS build was cancelled or failed.
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -74,3 +70,40 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+  # --- macOS: best effort, never blocks the release above -------------------------------
+  build-macos:
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: python -m unittest discover -s tests -t .
+      - name: Build
+        run: |
+          python -m pip install pyinstaller==6.11.1
+          python packaging/build.py --asset-name BuzzDrop-macos-apple-silicon.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BuzzDrop-macos-apple-silicon.zip
+          path: dist/BuzzDrop-macos-apple-silicon.zip
+
+  release-macos:
+    needs: [release, build-macos]
+    # Only once the real release exists; quietly does nothing if there is no Mac build.
+    if: ${{ !cancelled() && needs.release.result == 'success' && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: BuzzDrop-macos-apple-silicon.zip
+          path: mac
+      - uses: softprops/action-gh-release@v2
+        if: ${{ hashFiles('mac/*') != '' }}
+        with:
+          files: mac/*

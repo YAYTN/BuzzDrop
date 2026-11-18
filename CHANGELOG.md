@@ -2,6 +2,7 @@
 
 ## 1.1.1
 
+- **Calmer uninstall (Windows):** no more console window flashing open and closed while BuzzDrop removes itself. The two questions are now one dialog with "Also delete my settings and history" as a tick box, and **Cancel, Esc and the X all really cancel** (before, the second question had no way out).
 - **Clean restart after an update (Windows):** when BuzzDrop restarted itself after installing an update, the new copy shared the old copy's temporary folder, so the old copy could not clean up and Windows showed *"Failed to remove temporary directory"* (and left a `_MEI…` folder in Temp). The restart now starts a fully independent copy. The one-time warning can still appear when updating *from* 1.1.0 or older, because those versions do the restarting; it is harmless, and the leftover `_MEI…` folder in your Temp folder can be deleted once BuzzDrop is closed.
 
 ## 1.1.0

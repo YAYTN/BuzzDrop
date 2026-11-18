@@ -196,7 +196,8 @@ def schedule_program_removal(exe: Optional[Path] = None) -> str:
     try:
         subprocess.Popen(["cmd.exe", "/c", str(script)], close_fds=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=0x08000000 | 0x00000008)     # no window | detached
+                         creationflags=0x08000000)     # CREATE_NO_WINDOW only: adding DETACHED_PROCESS makes
+                                                       # Windows open (and close) a visible console instead
         return "scheduled"
     except OSError as exc:
         log.warning("could not schedule removal of the program: %s", exc)
@@ -279,6 +280,56 @@ def summary(report: Report, keep_data: bool = False) -> str:
 # --------------------------------------------------------------------------
 # Dialog for "Settings → Apps → Uninstall" (no console, no running window)
 # --------------------------------------------------------------------------
+def ask(parent=None) -> Optional[bool]:
+    """One confirmation dialog. Returns None if cancelled (Cancel, Esc or the X), else True/False for
+    "also delete my settings and history"."""
+    import tkinter as tk
+    from tkinter import ttk
+
+    win = tk.Toplevel(parent)
+    win.title("Uninstall %s" % APP_NAME)
+    win.resizable(False, False)
+    result: List[Optional[bool]] = [None]
+    delete = tk.BooleanVar(master=win, value=False)
+    body = ttk.Frame(win, padding=18)
+    body.pack(fill="both", expand=True)
+    plan = "\n".join("•  " + i for i in describe())
+    ttk.Label(body, text="This will remove:", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+    ttk.Label(body, text=plan, justify="left", wraplength=420).pack(anchor="w", pady=(6, 10))
+    ttk.Label(body, text=NOT_TOUCHED, justify="left", wraplength=420).pack(anchor="w", pady=(0, 10))
+    ttk.Checkbutton(body, text="Also delete my settings and history", variable=delete).pack(anchor="w")
+    ttk.Label(body, text="Leave this off to keep them, for example if you plan to install %s again." % APP_NAME,
+              justify="left", wraplength=420, foreground="#666666").pack(anchor="w", padx=(22, 0), pady=(0, 14))
+    buttons = ttk.Frame(body)
+    buttons.pack(anchor="e")
+
+    def go() -> None:
+        result[0] = bool(delete.get())
+        win.destroy()
+    ok = ttk.Button(buttons, text="Uninstall", command=go)
+    ok.pack(side="right")
+    cancel = ttk.Button(buttons, text="Cancel", command=win.destroy)
+    cancel.pack(side="right", padx=(0, 8))
+    win.protocol("WM_DELETE_WINDOW", win.destroy)            # the X means Cancel
+    win.bind("<Escape>", lambda _e: win.destroy())
+    win.bind("<Return>", lambda _e: go())
+    cancel.focus_set()                                       # the safe choice is the default one
+    try:
+        win.update_idletasks()
+        x = win.winfo_screenwidth() // 2 - win.winfo_reqwidth() // 2
+        y = win.winfo_screenheight() // 3 - win.winfo_reqheight() // 2
+        win.geometry("+%d+%d" % (max(x, 0), max(y, 0)))
+        if parent is not None and parent.winfo_viewable():
+            win.transient(parent)
+        win.attributes("-topmost", True)
+        win.grab_set()
+        win.focus_force()
+    except tk.TclError:
+        pass
+    win.wait_window()
+    return result[0]
+
+
 def run_dialog() -> int:
     """``BuzzDrop --uninstall``: ask, uninstall, say what happened. Used by Windows' own Uninstall button."""
     try:
@@ -290,13 +341,10 @@ def run_dialog() -> int:
     root = tk.Tk()
     root.withdraw()
     try:
-        plan = "\n".join("• " + i for i in describe())
-        if not messagebox.askyesno("Uninstall %s" % APP_NAME, "This will remove:\n\n%s\n\n%s\n\nUninstall %s?"
-                                   % (plan, NOT_TOUCHED, APP_NAME)):
+        delete_data = ask(root)
+        if delete_data is None:
             return 1
-        keep_data = not messagebox.askyesno(
-            "Uninstall %s" % APP_NAME, "Also delete your settings and history?\n\n"
-            "Choose No to keep them, for example if you plan to install %s again." % APP_NAME)
+        keep_data = not delete_data
         report = run_all(keep_data=keep_data)
         (messagebox.showinfo if report.clean else messagebox.showwarning)(
             "Uninstall %s" % APP_NAME, summary(report, keep_data))

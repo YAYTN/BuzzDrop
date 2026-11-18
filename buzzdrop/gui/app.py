@@ -802,14 +802,9 @@ class App:
     # -------------------------------------------------------------- uninstall
     def uninstall_flow(self) -> None:
         """Settings → Uninstall…: explain, ask, undo the integrations now, delete the files as the app exits."""
-        plan = "\n".join("• " + i for i in uninstall.describe())
-        title = "Uninstall %s" % APP_NAME
-        if not messagebox.askyesno(title, "This will remove:\n\n%s\n\n%s\n\nUninstall %s?"
-                                   % (plan, uninstall.NOT_TOUCHED, APP_NAME), parent=self.root):
-            return
-        delete_data = messagebox.askyesno(
-            title, "Also delete your settings and history?\n\nChoose No to keep them, for example if you plan to "
-            "install %s again." % APP_NAME, parent=self.root)
+        delete_data = uninstall.ask(self.root)
+        if delete_data is None:
+            return                                    # cancelled: nothing happens
         if self.manager.busy and not messagebox.askyesno(
                 APP_NAME, "Transfers are still running.\nCancel them and uninstall?", icon="warning",
                 parent=self.root):

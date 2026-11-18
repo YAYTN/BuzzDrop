@@ -312,7 +312,7 @@ class GuiEndToEnd(unittest.TestCase):
         try:
             with mock.patch.object(uninstall, "remove_integrations", fake_remove), \
                     mock.patch.object(uninstall, "finish", fake_finish), \
-                    mock.patch.object(A.messagebox, "askyesno", lambda *a, **k: next(script)), \
+                    mock.patch.object(uninstall, "ask", lambda *a, **k: next(script)), \
                     mock.patch.object(A.messagebox, "showinfo", lambda *a, **k: shown.append(a)), \
                     mock.patch.object(A.messagebox, "showwarning", lambda *a, **k: shown.append(a)):
                 app.uninstall_flow()
@@ -329,7 +329,7 @@ class GuiEndToEnd(unittest.TestCase):
                 pass
 
     def test_uninstall_button_removes_everything_when_confirmed(self):
-        calls, shown, app = self._uninstall_run([True, True])            # "Uninstall?" yes · "delete my data too?" yes
+        calls, shown, app = self._uninstall_run([True])                  # confirmed, "delete my data too" ticked
         self.assertIn("integrations", calls)                              # undone right away …
         self.assertIs(calls["finish_keep_data"], False)                   # … and the data deleted at the end
         self.assertTrue(app.was_closing)
@@ -338,12 +338,12 @@ class GuiEndToEnd(unittest.TestCase):
         self.assertIn("nothing of BuzzDrop is left behind", shown[0][1])
 
     def test_uninstall_button_can_keep_settings_and_history(self):
-        calls, shown, app = self._uninstall_run([True, False])           # … but "delete my data too?" no
+        calls, shown, app = self._uninstall_run([False])                 # confirmed, "delete my data too" not ticked
         self.assertIs(calls["finish_keep_data"], True)
         self.assertIn("kept", shown[0][1])
 
     def test_uninstall_button_does_nothing_when_cancelled(self):
-        calls, shown, app = self._uninstall_run([False])                 # "Uninstall?" no
+        calls, shown, app = self._uninstall_run([None])                  # Cancel / Esc / the X
         self.assertEqual(calls, {})
         self.assertEqual(shown, [])
         self.assertFalse(app.was_closing)                                # nothing happened, the app keeps running
@@ -359,22 +359,44 @@ class GuiEndToEnd(unittest.TestCase):
             return uninstall.Report(done=["removed it"], program="scheduled")
         infos = []
         with mock.patch.object(uninstall, "run_all", fake_run_all), \
-                mock.patch("tkinter.messagebox.askyesno", side_effect=[True, True]), \
+                mock.patch.object(uninstall, "ask", return_value=True), \
                 mock.patch("tkinter.messagebox.showinfo", lambda *a, **k: infos.append(a)):
             self.assertEqual(uninstall.run_dialog(), 0)                  # yes, and "delete my data too" yes
         self.assertEqual(seen, [(False, True)])
         self.assertIn("nothing of BuzzDrop is left", infos[0][1])
         seen.clear()
         with mock.patch.object(uninstall, "run_all", fake_run_all), \
-                mock.patch("tkinter.messagebox.askyesno", side_effect=[True, False]), \
+                mock.patch.object(uninstall, "ask", return_value=False), \
                 mock.patch("tkinter.messagebox.showinfo", lambda *a, **k: None):
             uninstall.run_dialog()                                       # yes, but keep my data
         self.assertEqual(seen, [(True, True)])
         seen.clear()
         with mock.patch.object(uninstall, "run_all", fake_run_all), \
-                mock.patch("tkinter.messagebox.askyesno", side_effect=[False]):
-            self.assertEqual(uninstall.run_dialog(), 1)                  # no: nothing happens
+                mock.patch.object(uninstall, "ask", return_value=None):
+            self.assertEqual(uninstall.run_dialog(), 1)                  # cancelled: nothing happens
         self.assertEqual(seen, [])
+
+    def test_the_real_dialog_can_be_cancelled_every_way(self):
+        import tkinter as tk
+        from buzzdrop import uninstall
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            def run(action):
+                root.after(300, lambda: action(next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))))
+                return uninstall.ask(root)
+            self.assertIsNone(run(lambda w: w.event_generate("<Escape>")))
+            # the X runs whatever is registered for WM_DELETE_WINDOW
+            self.assertIsNone(run(lambda w: w.tk.eval(w.tk.call("wm", "protocol", w, "WM_DELETE_WINDOW"))))
+            self.assertIs(run(lambda w: w.event_generate("<Return>")), False)
+        finally:
+            root.destroy()
+
+    def test_the_removal_script_gets_no_console_window(self):
+        import inspect
+        from buzzdrop import uninstall
+        src = inspect.getsource(uninstall.schedule_program_removal)
+        self.assertIn("creationflags=0x08000000)", src)                  # CREATE_NO_WINDOW alone, not + DETACHED
 
     def test_a_quit_message_closes_the_app(self):
         import tkinter as tk

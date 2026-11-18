@@ -25,9 +25,9 @@ Tiny (~12 MB) · zero dependencies · Windows · macOS · Linux
 
 | System | Get it | First launch |
 |---|---|---|
-| **Windows 10 / 11** | [`BuzzDrop-windows-x64.exe`](https://github.com/YAYTN/BuzzDrop/releases/latest) | Just run it — one file, no installer. If SmartScreen appears: **More info → Run anyway**. |
-| **macOS** (Apple silicon) | [`BuzzDrop-macos-apple-silicon.zip`](https://github.com/YAYTN/BuzzDrop/releases/latest) | Unzip, drag to **Applications**, then **right-click → Open** the first time. |
-| **Linux** (x86-64) | [`BuzzDrop-linux-x86_64`](https://github.com/YAYTN/BuzzDrop/releases/latest) | `chmod +x BuzzDrop-linux-x86_64 && ./BuzzDrop-linux-x86_64` |
+| **Windows 10 / 11** | [`BuzzDrop-windows-x64.exe`](https://github.com/YAYTN/BuzzDrop/releases/latest/download/BuzzDrop-windows-x64.exe) | Just run it — one file, no installer. If SmartScreen appears: **More info → Run anyway**. |
+| **Linux** (x86-64) | [`BuzzDrop-linux-x86_64`](https://github.com/YAYTN/BuzzDrop/releases/latest/download/BuzzDrop-linux-x86_64) | `chmod +x BuzzDrop-linux-x86_64 && ./BuzzDrop-linux-x86_64` |
+| **macOS** (Apple silicon) | [`BuzzDrop-macos-apple-silicon.zip`](https://github.com/YAYTN/BuzzDrop/releases/latest) *(on the release page, once it has been built)* | Unzip, drag to **Applications**, then **right-click → Open** the first time. |
 | **Anything with Python 3.9+** (Intel Macs, ARM Linux, …) | `pipx install git+https://github.com/YAYTN/BuzzDrop` | Run `buzzdrop` (app) or `buzz` (terminal) — or download the source and double-click **`BuzzDrop.pyw`**. |
 
 *The Windows and Linux apps are tested automatically. The macOS app is built the same way but hasn't been tried on a real Mac yet; please [report](https://github.com/YAYTN/BuzzDrop/issues) anything that doesn't work.*

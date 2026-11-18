@@ -213,6 +213,22 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(updater.UpdateError):
             updater.preflight(self.new, NEW_VERSION, command=[str(self.dir / "does-not-exist.exe")])
 
+    def test_the_restarted_app_is_an_independent_instance(self):
+        """A restarted packaged app must not share the old one's temp folder ("Failed to remove temporary directory")."""
+        seen = {}
+        with mock.patch.object(subprocess, "Popen", lambda cmd, **kw: seen.update(cmd=cmd, **kw)), \
+                mock.patch.dict(os.environ, {"_MEIPASS2": "C:\\old\\temp", "KEEP_ME": "1"}):
+            updater.relaunch(self.cur, 1234)
+        self.assertEqual(seen["env"]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+        self.assertNotIn("_MEIPASS2", seen["env"])
+        self.assertEqual(seen["env"]["KEEP_ME"], "1")                       # everything else is passed on
+        self.assertEqual(seen["cmd"][1:], ["--after-update", "1234"])
+        # the start-up check of the freshly downloaded file gets the same clean start
+        seen.clear()
+        with mock.patch.object(subprocess, "run", lambda cmd, **kw: (seen.update(kw), mock.Mock(returncode=0, stdout="BuzzDrop 9.9.9"))[1]):
+            updater.preflight(self.new, "9.9.9")
+        self.assertEqual(seen["env"]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+
     def test_wait_for_exit(self):
         quick = subprocess.Popen([sys.executable, "-c", "pass"])
         quick.wait()

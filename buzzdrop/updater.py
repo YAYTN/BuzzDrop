@@ -185,7 +185,7 @@ def preflight(new_path: Path, expected_version: str, command: Optional[List[str]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            creationflags=_NO_WINDOW if IS_WIN else 0,
-                           env=dict(os.environ, BUZZ_NO_INTEGRATION="1"))
+                           env=dict(_independent_env(), BUZZ_NO_INTEGRATION="1"))
     except (OSError, subprocess.SubprocessError) as exc:
         raise UpdateError("The new version didn't start (%s), so it was not installed." % exc)
     if r.returncode != 0 or expected_version not in (r.stdout or ""):
@@ -226,10 +226,22 @@ def swap_in(current: Path, new: Path) -> Path:
     return old
 
 
+def _independent_env() -> dict:
+    """Environment for starting ANOTHER copy of this packaged app as a brand-new, independent instance.
+
+    Without it the new copy believes it is a child of the running one and shares its temporary
+    folder (PyInstaller's ``_MEI…``), so the old copy cannot clean up when it exits and Windows shows
+    "Failed to remove temporary directory". ``PYINSTALLER_RESET_ENVIRONMENT`` is PyInstaller's switch for this.
+    """
+    env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
+    env.pop("_MEIPASS2", None)        # what older PyInstaller versions used
+    return env
+
+
 def relaunch(exe: Path, old_pid: int) -> None:
     """Start the updated app; it waits for *old_pid* to exit first (single-instance safe)."""
     subprocess.Popen([str(exe), "--after-update", str(old_pid)], close_fds=True, cwd=str(Path(exe).parent),
-                     creationflags=_DETACHED if IS_WIN else 0)
+                     env=_independent_env(), creationflags=_DETACHED if IS_WIN else 0)
 
 
 def wait_for_exit(pid: int, timeout: float = 20.0) -> bool:

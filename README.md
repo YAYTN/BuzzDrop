@@ -7,9 +7,15 @@
 **Drop a file, get a link. Click a link, get the file.** — powered by [BuzzHeavier](https://buzzheavier.com)
 
 Tiny (~12 MB) · zero dependencies · Windows · macOS · Linux
-<img src="docs/dark-send.png" width="290" alt="Send tab (dark)">&nbsp;
-<img src="docs/dark-receive.png" width="290" alt="Receive tab (dark)">&nbsp;
-<img src="docs/light-send.png" width="290" alt="Send tab (light)">
+
+<img src="docs/dark-send.png" width="290" alt="Sending files (dark)">&nbsp;
+<img src="docs/dark-receive.png" width="290" alt="Receiving files (dark)">&nbsp;
+<img src="docs/light-send.png" width="290" alt="Finished uploads (light)">
+
+<img src="docs/light-history.png" width="290" alt="History (light)">&nbsp;
+<img src="docs/dark-settings.png" width="290" alt="Settings (dark)">
+
+<sub>Screenshots use sample files.</sub>
 
 </div>
 

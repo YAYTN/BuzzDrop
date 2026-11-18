@@ -217,6 +217,75 @@ class GuiEndToEnd(unittest.TestCase):
             except tk.TclError:
                 pass
 
+    def test_each_upload_offers_both_kinds_of_link(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A, draw
+        from buzzdrop.transfers import DONE, SEND, Job
+
+        self.assertEqual(len(draw.icon_rgba("globe", 24, "#ffffff")), 24 * 24 * 4)   # the new icon renders
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        copied = []
+        app.copy = lambda text: copied.append(text) or True      # never touch the real clipboard in tests
+        try:
+            job = Job(SEND, "photo.jpg", paths=["photo.jpg"])
+            job.state, job.result = DONE, {"code": "abcd1234efgh", "name": "photo.jpg", "size": 5}
+            app.manager.jobs.append(job)
+            row = app._add_row(job)
+            acts = {tip: fn for _icon, tip, fn in row._actions_for_state()}
+            bz = next(fn for tip, fn in acts.items() if tip.startswith("Copy BZ://"))
+            web = next(fn for tip, fn in acts.items() if tip.startswith("Copy web link"))
+            for style in ("bz", "https"):                          # the setting must not matter
+                app.settings["link_style"] = style
+                bz()
+                web()
+            self.assertEqual(copied, ["BZ://abcd1234efgh", "https://buzzheavier.com/abcd1234efgh"] * 2)
+            app.settings["link_style"] = "https"
+            app.copy_link("abcd1234efgh")                          # no explicit kind: follows the setting
+            self.assertEqual(copied[-1], "https://buzzheavier.com/abcd1234efgh")
+        finally:
+            app.quit()
+            try:
+                self._pump(root, lambda: False, timeout=0.5)
+            except tk.TclError:
+                pass
+
+    def test_history_forgets_automatically_only_when_asked(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A
+
+        now = time.time()
+        hist = Path(self.tmp.name, "history.json")
+        hist.write_text(json.dumps([
+            {"kind": "send", "name": "recent", "code": "aaaa11112222", "size": 1, "time": now - 60, "path": ""},
+            {"kind": "send", "name": "ancient", "code": "bbbb11112222", "size": 1, "time": now - 40 * 86400, "path": ""}]))
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            root.update()
+            names = lambda: [e["name"] for e in json.loads(hist.read_text())]
+            app._apply_history_policy()                       # default: off, nothing is forgotten
+            self.assertEqual(names(), ["recent", "ancient"])
+            app.settings["history_keep_days"] = 7             # opted in: older than a week goes
+            app._apply_history_policy()
+            self.assertEqual(names(), ["recent"])
+            app.settings["history_keep_days"] = -1            # "on exit": nothing happens while running …
+            app._apply_history_policy()
+            self.assertEqual(names(), ["recent"])
+            app.quit()                                        # … and everything goes when quitting
+            self._pump(root, lambda: False, timeout=0.8)
+            self.assertEqual(names(), [])
+        finally:
+            try:
+                app.quit()
+                self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
     def test_colour_change_swaps_in_one_complete_page(self):
         import tkinter as tk
         from buzzdrop.gui import app as A

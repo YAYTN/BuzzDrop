@@ -204,6 +204,9 @@ ICONS: Dict[str, Callable[[float, float], float]] = {
     "copy": lambda x, y: min(
         abs(d_box(x, y, 15, 15, 7, 7, 2)) - S,
         max(abs(d_box(x, y, 9, 9, 7, 7, 2)) - S, -d_box(x, y, 15, 15, 9, 9, 3))),
+    "globe": lambda x, y: min(
+        abs(d_circle(x, y, 12, 12, 9.5)), d_seg(x, y, 2.5, 12, 21.5, 12), d_seg(x, y, 12, 2.5, 12, 21.5),
+        d_seg(x, y, 3.63, 7.5, 20.37, 7.5), d_seg(x, y, 3.63, 16.5, 20.37, 16.5)) - S,
     "folder": lambda x, y: d_poly(x, y, _p((4, 20), (20, 20), (22, 18), (22, 8), (20, 6), (12.1, 6), (10.4, 5.1),
                                            (9.6, 3.9), (7.9, 3), (4, 3), (2, 5), (2, 18), (4, 20))) - S,
     "external": lambda x, y: min(d_poly(x, y, _p((15, 3), (21, 3), (21, 9))), d_seg(x, y, 10, 14, 21, 3),

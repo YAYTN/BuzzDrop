@@ -92,6 +92,52 @@ class ConfigTests(TempData):
         from buzzdrop.gui import theme
         self.assertEqual(theme.build_palette(True, "nope", "nope"), theme.build_palette(True, "teal", "default"))
 
+    def _write_history(self, now):
+        entries = [
+            {"kind": "send", "name": "new", "code": "aaaa11112222", "size": 1, "time": now - 3600, "path": ""},
+            {"kind": "send", "name": "week", "code": "bbbb11112222", "size": 1, "time": now - 6 * 86400, "path": ""},
+            {"kind": "receive", "name": "old", "code": "cccc11112222", "size": 1, "time": now - 40 * 86400, "path": ""},
+            {"kind": "receive", "name": "no-time", "code": "dddd11112222", "size": 1, "path": ""},
+        ]
+        Path(self.tmp.name, "history.json").write_text(json.dumps(entries))
+        return config.History()
+
+    def test_history_prune_forgets_only_old_entries(self):
+        now = time.time()
+        h = self._write_history(now)
+        self.assertEqual(h.older_than(30, now=now), 1)
+        self.assertEqual(h.prune(30, now=now), 1)
+        self.assertEqual([e["name"] for e in h.items], ["new", "week", "no-time"])
+        self.assertEqual(config.History().items, h.items)            # saved to disk
+        self.assertEqual(h.prune(30, now=now), 0)                    # nothing more to forget
+        self.assertEqual(h.prune(1, now=now), 1)                     # "week" goes; the entry without a time is kept
+        self.assertEqual([e["name"] for e in h.items], ["new", "no-time"])
+
+    def test_history_is_kept_forever_unless_the_user_opts_in(self):
+        now = time.time()
+        h = self._write_history(now)
+        self.assertEqual(config.DEFAULTS["history_keep_days"], 0)
+        for closing in (False, True):
+            self.assertEqual(config.apply_history_policy(h, {"history_keep_days": 0}, closing), 0)
+            self.assertEqual(config.apply_history_policy(h, {}, closing), 0)
+        self.assertEqual(len(config.History().items), 4)
+
+    def test_history_policy_n_days_and_on_exit(self):
+        now = time.time()
+        h = self._write_history(now)
+        self.assertEqual(config.apply_history_policy(h, {"history_keep_days": 7}), 1)      # only "old" is >7 days
+        self.assertEqual([e["name"] for e in h.items], ["new", "week", "no-time"])
+        # "on exit" does nothing while the app keeps running …
+        self.assertEqual(config.apply_history_policy(h, {"history_keep_days": -1}, closing=False), 0)
+        self.assertEqual(len(config.History().items), 3)
+        # … and forgets everything when it quits
+        self.assertEqual(config.apply_history_policy(h, {"history_keep_days": -1}, closing=True), 3)
+        self.assertEqual(config.History().items, [])
+        # nonsense in the settings file never deletes anything
+        h = self._write_history(now)
+        self.assertEqual(config.apply_history_policy(h, {"history_keep_days": "soon"}, True), 0)
+        self.assertEqual(len(config.History().items), 4)
+
     def test_corrupt_config_falls_back(self):
         Path(self.tmp.name, "config.json").write_text("{not json")
         self.assertEqual(config.load_settings()["theme"], "system")

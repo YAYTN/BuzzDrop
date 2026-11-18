@@ -147,7 +147,9 @@ DEFAULTS: Dict[str, Any] = {
     "copy_link": True,
     "link_style": "bz",                  # "bz" → BZ://code, "https" → https://buzzheavier.com/code
     "bundle_multiple": False,            # several files → one ZIP / one link
-    "split_mb": 0,                       # optional: >0 → send files bigger than this in parts of this size    # General
+    "split_mb": 0,                       # optional: >0 → send files bigger than this in parts of this size
+    # General
+    "history_keep_days": 0,              # privacy, opt-in: 0 keep forever · -1 forget on quit · N>0 forget entries older than N days
     "theme": "system",                   # system | dark | light
     "accent": "teal",                    # teal | blue | violet | rose | amber | green
     "palette": "default",                # default | ocean | neutral | warm | pure (background colours)
@@ -237,6 +239,49 @@ class History:
         with FileLock(self.path.with_suffix(".lock"), timeout=3):
             self.items = []
             write_json(self.path, [])
+
+    def older_than(self, days: float, now: Optional[float] = None) -> int:
+        """How many entries are older than *days* days (entries without a valid time are never counted)."""
+        cutoff = (time.time() if now is None else now) - days * 86400
+        return sum(1 for i in self._read() if isinstance(i.get("time"), (int, float)) and i["time"] < cutoff)
+
+    def prune(self, days: float, now: Optional[float] = None) -> int:
+        """Forget entries older than *days* days. Returns how many were removed.
+
+        Only this list changes: downloaded files and uploaded links are not touched.
+        """
+        cutoff = (time.time() if now is None else now) - days * 86400
+        with FileLock(self.path.with_suffix(".lock"), timeout=3):
+            items = self._read()
+            kept = [i for i in items if not isinstance(i.get("time"), (int, float)) or i["time"] >= cutoff]
+            removed = len(items) - len(kept)
+            if removed:
+                write_json(self.path, kept)
+            self.items = kept
+        return removed
+
+
+def apply_history_policy(history: History, settings: Dict[str, Any], closing: bool = False) -> int:
+    """Apply the opt-in "forget my history automatically" setting. Returns how many entries were forgotten.
+
+    ``history_keep_days``: 0 = keep forever (default); N > 0 = forget entries older than N days;
+    -1 = forget everything when BuzzDrop quits (only acts when *closing* is true).
+    """
+    try:
+        keep = int(settings.get("history_keep_days") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if keep == 0:
+        return 0
+    if keep < 0:
+        if not closing:
+            return 0
+        history.reload()
+        count = len(history.items)
+        if count:
+            history.clear()
+        return count
+    return history.prune(keep)
 
 
 # --------------------------------------------------------------------------

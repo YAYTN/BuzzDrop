@@ -10,6 +10,8 @@ First release of BuzzDrop: drop a file, get a link; click a link, get the file.
 - **One window:** Send / Receive / History tabs, drag & drop, paste-to-send, live speed and time left, light/dark/system themes, notifications, keyboard shortcuts, high-DPI.
 - **Smarter receiving:** resumes after dropped connections, offers to download links you copy, keeps a searchable history, global hotkey on Windows.
 - **Quiet one-click updates (Windows):** download in the background, verified by SHA-256 and test-started before anything is replaced, installed only when you restart or close the app, with the previous version kept as a backup until the new one has run fine. `buzz update` does the same from a terminal.
+- **Both kinds of link, always:** every finished upload (and every History entry) has a button for the `BZ://` link and one for the plain web link, so you can share with people who don't have BuzzDrop without touching a setting.
+- **Opt-in privacy:** *Forget my history automatically* (on quit, or after 1 / 7 / 30 days). Only the list is cleared, never files or links. Off by default.
 - **Reliable sending:** a dropped upload restarts automatically (up to 3 times). Optional split uploads send huge files in separately retried parts; every part is a normal BuzzHeavier file with its own link.
 
 ### Safe by design

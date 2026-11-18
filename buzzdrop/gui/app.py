@@ -19,7 +19,7 @@ from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional
 
 from .. import APP_ID, APP_NAME, REPO_URL, __version__, integration, updater
-from ..config import History, data_dir, download_dir, load_settings, save_settings
+from ..config import History, apply_history_policy, data_dir, download_dir, load_settings, save_settings
 from ..desktop import check_for_update, notify as desktop_notify, system_prefers_dark
 from ..transfers import CANCELLED, DONE, FAILED, QUEUED, RECEIVE, RUNNING, SEND, Job, TransferManager, describe
 from ..util import (IS_MAC, IS_WIN, find_codes, format_ago, format_size, open_path, open_url, parse_codes,
@@ -213,7 +213,8 @@ class TransferRow(_Row):
         remove = ("x", "Remove from list", lambda: a.remove_row(j))
         if j.state == DONE and j.kind == SEND:
             code = j.result["code"]
-            return [("copy", "Copy link", lambda: a.copy_link(code)),
+            return [("copy", "Copy BZ:// link (for people who use BuzzDrop)", lambda: a.copy_link(code, "bz")),
+                    ("globe", "Copy web link (works for anyone)", lambda: a.copy_link(code, "https")),
                     ("external", "Open download page", lambda: open_url(web_link(code))), remove]
         if j.state == DONE:
             target = j.result.get("extracted") or j.result.get("path")
@@ -325,7 +326,8 @@ class HistoryRow(_Row):
         self.draw_badge(None, "upload" if sent else "download", c.accent_soft if sent else c.info_soft,
                         c.accent_ink if sent else c.info)
         code = e.get("code", "")
-        acts = [("copy", "Copy link", lambda: self.app.copy_link(code))]
+        acts = [("copy", "Copy BZ:// link (for people who use BuzzDrop)", lambda: self.app.copy_link(code, "bz")),
+                ("globe", "Copy web link (works for anyone)", lambda: self.app.copy_link(code, "https"))]
         if not sent and self._path():
             acts.append(("folder", "Show in folder", lambda: self.app.reveal(self._path())))
         elif not sent:
@@ -807,8 +809,9 @@ class App:
         self._auto_opens = recent
         return True
 
-    def copy_link(self, code: str) -> None:
-        link = share_link(code, self.settings.get("link_style", "bz"))
+    def copy_link(self, code: str, style: Optional[str] = None) -> None:
+        """Copy a link. *style* "bz" or "https" picks the kind; None follows the Link style setting."""
+        link = share_link(code, style or self.settings.get("link_style", "bz"))
         if self.copy(link):
             self.toast("Copied %s" % link, "success")
 
@@ -905,6 +908,24 @@ class App:
                      font=ui.f.small, fg=c.text3, bg=c.bg).pack(pady=ui.px(10))
         self.hist_list.scroll_top()
         self._hist_dirty = False
+
+    def _apply_history_policy(self, closing: bool = False) -> None:
+        """The opt-in "forget my history automatically" setting (off by default)."""
+        try:
+            removed = apply_history_policy(self.history, self.settings, closing)
+        except Exception as exc:  # never let housekeeping disturb the app
+            log.warning("history cleanup failed: %s", exc)
+            return
+        if removed and not closing:
+            self._hist_dirty = True
+            if self.page == "history" and not self.in_settings:
+                self._render_history()
+
+    def _history_timer(self) -> None:
+        if self._closing:
+            return
+        self._apply_history_policy()
+        self.root.after(30 * 60 * 1000, self._history_timer)   # left running for days? check every 30 minutes
 
     def remove_history(self, entry: Dict[str, Any]) -> None:
         self.history.remove(entry)
@@ -1072,7 +1093,8 @@ class App:
             "haven't copied anything else since. (Windows' own Win+V history keeps its own copy.)" if IS_WIN else
             "Removes the link from your clipboard — only if you haven't copied anything else since.",
             seg("clear_clipboard_s", [("0", "Off"), ("30", "30 s"), ("60", "1 min"), ("300", "5 min")], width=250))
-        row(card, "Link style", "https:// links are clickable in every chat app; BZ:// links open BuzzDrop.",
+        row(card, "Link style", "What BuzzDrop copies for you automatically. https:// links are clickable in every "
+            "chat app; BZ:// links open BuzzDrop. Every finished upload also has a button for each kind.",
             seg("link_style", [("bz", "BZ://"), ("https", "https://")], after=lambda v: self._refresh_rows(), width=170))
         row(card, "Send multiple files as one ZIP", "One link for everything you drop at once.",
             toggle("bundle_multiple"))
@@ -1108,6 +1130,29 @@ class App:
                 after=lambda v: self.root.after(180, lambda: self.rebuild(settings_open=True))))
         row(card, "Notifications", "Tell me when a transfer finishes while I'm in another app.",
             toggle("notifications"))
+
+        # -- Privacy
+        card = section("Privacy")
+        self._history_keep_prev = int(self.settings.get("history_keep_days") or 0)
+
+        def history_changed(v: str) -> None:
+            keep = int(v)
+            self.history.reload()
+            n = self.history.older_than(keep) if keep > 0 else 0
+            if n and not messagebox.askyesno(
+                    APP_NAME, "This forgets %d entr%s older than %d day%s from your history.\n"
+                    "(Only the list: files and shared links are not touched.)\n\nContinue?"
+                    % (n, "y" if n == 1 else "ies", keep, "" if keep == 1 else "s"), parent=self.root):
+                self._save("history_keep_days", self._history_keep_prev)   # changed their mind
+                self.root.after(60, lambda: self.rebuild(settings_open=True))
+                return
+            self._history_keep_prev = keep
+            self._apply_history_policy()
+        row(card, "Forget my history automatically", "Removes the list of what you sent and received, and "
+            "nothing else: files you downloaded and links you shared are not touched. “On exit” means when you "
+            "quit BuzzDrop (closing the window to the tray doesn't count). Off by default.",
+            seg("history_keep_days", [("0", "Off"), ("-1", "On exit"), ("1", "1 day"), ("7", "7 days"),
+                                      ("30", "30 days")], after=history_changed, width=340))
 
         # -- Integration
         card = section("System integration")
@@ -1534,6 +1579,8 @@ class App:
             threading.Thread(target=integration.heal, daemon=True).start()
         if s.get("check_for_updates", True) and time.time() - float(s.get("last_update_check") or 0) > 86400:
             self._check_updates(manual=False)
+        self._apply_history_policy()
+        self.root.after(30 * 60 * 1000, self._history_timer)
         exe = updater.current_exe()
         if exe is not None:  # once the app has run fine for a while, drop the previous version's backup
             def tidy() -> None:
@@ -1749,6 +1796,7 @@ class App:
             if self.manager.busy and time.monotonic() < deadline:
                 self.root.after(50, wait)
             else:
+                self._apply_history_policy(closing=True)   # "forget on quit", after cancelled transfers settled
                 self.root.destroy()
         wait()
 

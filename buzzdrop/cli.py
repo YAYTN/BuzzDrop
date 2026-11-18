@@ -155,7 +155,7 @@ def cmd_send(argv: List[str]) -> int:
     a = p.parse_args(argv)
 
     from .api import Client
-    from .config import History, load_settings, setup_logging
+    from .config import History, apply_history_policy, load_settings, setup_logging
     from .desktop import copy_text
     from .transfers import DONE, SEND, Job, describe, execute
     from .util import share_link
@@ -203,6 +203,7 @@ def cmd_send(argv: List[str]) -> int:
     except KeyboardInterrupt:
         printer.say("Cancelled.")
         return 130
+    apply_history_policy(history, settings, closing=True)   # opt-in privacy setting; a no-op by default
     if links and not a.no_copy and settings.get("copy_link", True):
         if copy_text("\n".join(links)) and not a.json:
             printer.say("Copied to clipboard.")
@@ -220,7 +221,7 @@ def cmd_get(argv: List[str]) -> int:
     a = p.parse_args(argv)
 
     from .api import Client
-    from .config import History, load_settings, setup_logging
+    from .config import History, apply_history_policy, load_settings, setup_logging
     from .transfers import DONE, RECEIVE, Job, describe, execute
     from .util import parse_codes, web_link
 
@@ -257,6 +258,7 @@ def cmd_get(argv: List[str]) -> int:
     except KeyboardInterrupt:
         printer.say("Cancelled.")
         return 130
+    apply_history_policy(history, settings, closing=True)   # opt-in privacy setting; a no-op by default
     if a.json:
         print(json.dumps(results, indent=2))
     return 0 if all(r["ok"] for r in results) else 1

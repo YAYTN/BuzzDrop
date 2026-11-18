@@ -53,7 +53,7 @@ On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send wit
 - Saves to your real Downloads folder, even if you moved it
 
 **Everything else**
-- History of everything you sent and received, with search and one-click copy
+- History of everything you sent and received, with search and one-click copy. *Optional privacy setting:* forget it automatically when you quit, or after 1 / 7 / 30 days (only the list is cleared, never your files or links). Off by default
 - Light / dark / follow-system theme, six accent colors and five background styles (Default, Ocean, Neutral, Warm, Pure black/white), crisp on high-DPI screens, matching title bar on Windows 11
 - Tray icon + start at login (Windows), desktop notifications
 - **Quiet updates:** a small "Update to x.y.z" button appears in the header. One click downloads it in the background (checked against the release's SHA-256 and test-started first); nothing restarts until you choose **Restart to finish** or close BuzzDrop. Optional: download updates automatically, or **Skip this version**. The macOS and Linux apps only tell you a new version exists

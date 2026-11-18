@@ -313,8 +313,8 @@ class GuiEndToEnd(unittest.TestCase):
             with mock.patch.object(uninstall, "remove_integrations", fake_remove), \
                     mock.patch.object(uninstall, "finish", fake_finish), \
                     mock.patch.object(uninstall, "ask", lambda *a, **k: next(script)), \
-                    mock.patch.object(A.messagebox, "showinfo", lambda *a, **k: shown.append(a)), \
-                    mock.patch.object(A.messagebox, "showwarning", lambda *a, **k: shown.append(a)):
+                    mock.patch.object(uninstall, "show_result",
+                                      lambda parent, rep, keep: shown.append((None, uninstall.summary(rep, keep)))):
                 app.uninstall_flow()
                 try:
                     self._pump(root, lambda: False, timeout=1.0)          # let quit() run to the end
@@ -360,14 +360,15 @@ class GuiEndToEnd(unittest.TestCase):
         infos = []
         with mock.patch.object(uninstall, "run_all", fake_run_all), \
                 mock.patch.object(uninstall, "ask", return_value=True), \
-                mock.patch("tkinter.messagebox.showinfo", lambda *a, **k: infos.append(a)):
+                mock.patch.object(uninstall, "show_result",
+                                  lambda parent, rep, keep: infos.append((None, uninstall.summary(rep, keep)))):
             self.assertEqual(uninstall.run_dialog(), 0)                  # yes, and "delete my data too" yes
         self.assertEqual(seen, [(False, True)])
         self.assertIn("nothing of BuzzDrop is left", infos[0][1])
         seen.clear()
         with mock.patch.object(uninstall, "run_all", fake_run_all), \
                 mock.patch.object(uninstall, "ask", return_value=False), \
-                mock.patch("tkinter.messagebox.showinfo", lambda *a, **k: None):
+                mock.patch.object(uninstall, "show_result", lambda *a, **k: None):
             uninstall.run_dialog()                                       # yes, but keep my data
         self.assertEqual(seen, [(True, True)])
         seen.clear()
@@ -389,6 +390,24 @@ class GuiEndToEnd(unittest.TestCase):
             # the X runs whatever is registered for WM_DELETE_WINDOW
             self.assertIsNone(run(lambda w: w.tk.eval(w.tk.call("wm", "protocol", w, "WM_DELETE_WINDOW"))))
             self.assertIs(run(lambda w: w.event_generate("<Return>")), False)
+        finally:
+            root.destroy()
+
+    def test_the_result_message_is_on_top_and_dismisses(self):
+        import tkinter as tk
+        from buzzdrop import uninstall
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            seen = {}
+
+            def check_then_close():
+                w = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))
+                seen["topmost"] = bool(w.attributes("-topmost"))
+                w.event_generate("<Return>")
+            root.after(300, check_then_close)
+            uninstall.show_result(root, uninstall.Report(done=["x"], program="scheduled"), False)
+            self.assertTrue(seen["topmost"])                                # cannot hide behind other windows
         finally:
             root.destroy()
 

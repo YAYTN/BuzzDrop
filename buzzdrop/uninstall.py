@@ -184,7 +184,7 @@ def schedule_program_removal(exe: Optional[Path] = None) -> str:
     script = Path(tempfile.gettempdir()) / ("buzzdrop-remove-%s.cmd" % uuid.uuid4().hex[:8])
     script.write_text(
         "@echo off\r\n"
-        "for /l %%i in (1,1,90) do (\r\n"
+        "for /l %%i in (1,1,900) do (\r\n"
         "  del /f /q \"{exe}\" >nul 2>&1\r\n"
         "  if not exist \"{exe}\" goto gone\r\n"
         "  ping -n 2 127.0.0.1 >nul\r\n"
@@ -330,11 +330,49 @@ def ask(parent=None) -> Optional[bool]:
     return result[0]
 
 
+def show_result(parent, report: "Report", keep_data: bool) -> None:
+    """The "all done" (or "mostly done") message, always on top so it can never hide behind other windows.
+
+    The program stays running until it is dismissed (Windows cannot delete a running program), so a message
+    that sat unseen behind another window would leave BuzzDrop in the Task Manager and its file on disk.
+    It also closes by itself after a while, whatever happens.
+    """
+    import tkinter as tk
+    from tkinter import ttk
+
+    win = tk.Toplevel(parent)
+    win.title("Uninstall %s" % APP_NAME)
+    win.resizable(False, False)
+    body = ttk.Frame(win, padding=18)
+    body.pack(fill="both", expand=True)
+    ttk.Label(body, text=summary(report, keep_data), justify="left", wraplength=460).pack(anchor="w", pady=(0, 14))
+    ok = ttk.Button(body, text="OK", command=win.destroy)
+    ok.pack(anchor="e")
+    win.protocol("WM_DELETE_WINDOW", win.destroy)
+    win.bind("<Return>", lambda _e: win.destroy())
+    win.bind("<Escape>", lambda _e: win.destroy())
+    ok.focus_set()
+    try:
+        win.update_idletasks()
+        x = win.winfo_screenwidth() // 2 - win.winfo_reqwidth() // 2
+        y = win.winfo_screenheight() // 3 - win.winfo_reqheight() // 2
+        win.geometry("+%d+%d" % (max(x, 0), max(y, 0)))
+        win.attributes("-topmost", True)
+        win.lift()
+        win.focus_force()
+        win.after(60000, win.destroy)                 # never keep the program alive more than a minute
+    except tk.TclError:
+        pass
+    try:
+        win.wait_window()
+    except tk.TclError:
+        pass
+
+
 def run_dialog() -> int:
     """``BuzzDrop --uninstall``: ask, uninstall, say what happened. Used by Windows' own Uninstall button."""
     try:
         import tkinter as tk
-        from tkinter import messagebox
     except ImportError:
         print("No window system available. Use:  buzz uninstall --yes", file=sys.stderr)
         return 2
@@ -346,8 +384,7 @@ def run_dialog() -> int:
             return 1
         keep_data = not delete_data
         report = run_all(keep_data=keep_data)
-        (messagebox.showinfo if report.clean else messagebox.showwarning)(
-            "Uninstall %s" % APP_NAME, summary(report, keep_data))
+        show_result(root, report, keep_data)
         return 0 if report.clean else 1
     finally:
         root.destroy()

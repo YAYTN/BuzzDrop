@@ -1,10 +1,10 @@
-"""BuzzDrop — send and receive files through BuzzHeavier.
+﻿"""BuzzDrop â€” send and receive files through BuzzHeavier.
 
 Pure standard-library Python: no third-party packages are required to run
 the app, the CLI or the tests.
 """
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 APP_NAME = "BuzzDrop"
 APP_ID = "BuzzDrop.App"

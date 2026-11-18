@@ -820,10 +820,15 @@ class App:
         report.done = list(u.get("done", [])) + report.done
         report.problems = list(u.get("problems", [])) + report.problems
         try:
-            (messagebox.showinfo if report.clean else messagebox.showwarning)(
-                "Uninstall %s" % APP_NAME, uninstall.summary(report, bool(u.get("keep_data"))))
+            uninstall.show_result(self.root, report, bool(u.get("keep_data")))   # always on top
         except tk.TclError:
             pass
+        if os.environ.get("BUZZ_GUI_TESTS") != "1":
+            # Whatever else might still be running, the program must really end now: its file is waiting
+            # to be deleted and Windows cannot delete a running program.
+            t = threading.Timer(5.0, os._exit, args=(0,))
+            t.daemon = True
+            t.start()
 
     def _auto_open_budget(self) -> bool:
         """At most 3 browser tabs per minute, so a batch of blocked links can't flood the browser."""

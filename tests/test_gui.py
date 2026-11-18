@@ -95,6 +95,7 @@ class GuiEndToEnd(unittest.TestCase):
         from buzzdrop.transfers import FAILED
 
         self.srv.add_file("blocked00001", "x.bin", b"x")
+        self.srv.add_file("blocked00002", "y.bin", b"y")
         self.srv.challenge = True            # BuzzHeavier answers with a browser check
         opened = []
         real_open = A.open_url
@@ -104,10 +105,17 @@ class GuiEndToEnd(unittest.TestCase):
         app = A.App(root, {"cmd": "open"}, None)
         root.attributes("-alpha", 0.0)
         try:
+            # default: quiet. The transfer fails with an "Open in browser" button; no tab is forced open.
             app.receive_codes(["blocked00001"])
             self.assertTrue(self._pump(root, lambda: any(j.state == FAILED for j in app.manager.jobs)))
+            self._pump(root, lambda: False, timeout=0.6)
+            self.assertEqual(opened, [])
+            self.assertTrue(app.manager.jobs[0].blocked)
+            # opt-in: the page opens by itself
+            app.settings["open_blocked_in_browser"] = True
+            app.receive_codes(["blocked00002"])
             self.assertTrue(self._pump(root, lambda: len(opened) == 1))
-            self.assertTrue(opened[0].endswith("/blocked00001"))
+            self.assertTrue(opened[0].endswith("/blocked00002"))
             self.assertEqual(self.srv.download_requests, [])   # we never tried to get around the check
             for _ in range(5):   # a flood of blocked links opens at most 3 tabs a minute
                 app._auto_open_budget()
@@ -117,6 +125,95 @@ class GuiEndToEnd(unittest.TestCase):
             app.quit()
             try:
                 self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
+    def _update_app(self):
+        """An App wired to a fake GitHub and a stand-in 'installed exe' in a temp folder."""
+        import tkinter as tk
+        from unittest import mock
+        from buzzdrop import updater
+        from buzzdrop.gui import app as A
+        from buzzdrop.desktop import check_for_update
+        from .test_updater import FakeGitHub
+
+        gh = FakeGitHub()
+        exe = Path(self.tmp.name) / "installed" / "BuzzDrop.exe"
+        exe.parent.mkdir(exist_ok=True)
+        exe.write_bytes(b"OLD")
+        patches = [mock.patch.dict(os.environ, {"BUZZ_GITHUB_API": gh.url}),
+                   mock.patch.object(updater, "current_exe", lambda: exe),
+                   mock.patch.object(updater, "can_self_update", lambda target=None: True),
+                   mock.patch.object(updater, "preflight", lambda *a, **k: None)]
+        for p in patches:
+            p.start()
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        app.update_info = check_for_update()
+        app._render_update_pill()
+
+        def cleanup():
+            for p in patches:
+                p.stop()
+            gh.shutdown()
+            gh.server_close()
+        return root, app, exe, cleanup
+
+    def test_update_pill_downloads_then_restarts_only_when_asked(self):
+        import tkinter as tk
+        from unittest import mock
+        from buzzdrop import updater
+        from .test_updater import APP_BYTES
+        root, app, exe, cleanup = self._update_app()
+        try:
+            self.assertEqual(app._update_state, "idle")
+            app.start_update_download()
+            self.assertTrue(self._pump(root, lambda: app._update_state == "ready"))
+            self.assertEqual(exe.read_bytes(), b"OLD")                 # downloaded, but NOT installed yet
+            self.assertEqual((exe.parent / "BuzzDrop.exe.new").read_bytes(), APP_BYTES)
+            launched = []
+            with mock.patch.object(updater, "relaunch", lambda e, pid: launched.append((e, pid))):
+                app.restart_for_update()                               # the user clicked "Restart to finish"
+            self.assertEqual(exe.read_bytes(), APP_BYTES)              # now installed …
+            self.assertEqual((exe.parent / "BuzzDrop.exe.old").read_bytes(), b"OLD")   # … with a backup
+            self.assertEqual(launched, [(exe, os.getpid())])
+        finally:
+            cleanup()
+            try:
+                self._pump(root, lambda: False, timeout=0.5)
+            except tk.TclError:
+                pass
+
+    def test_ready_update_installs_when_the_app_is_closed_and_can_be_skipped(self):
+        import tkinter as tk
+        from .test_updater import APP_BYTES
+        root, app, exe, cleanup = self._update_app()
+        try:
+            app.start_update_download()
+            self.assertTrue(self._pump(root, lambda: app._update_state == "ready"))
+            self.assertEqual(exe.read_bytes(), b"OLD")
+            app.quit()                                                 # closing for real installs it, no restart
+            self.assertEqual(exe.read_bytes(), APP_BYTES)
+        finally:
+            cleanup()
+            try:
+                self._pump(root, lambda: False, timeout=0.5)
+            except tk.TclError:
+                pass
+
+        root, app, exe, cleanup = self._update_app()                  # a fresh app: skipping a version
+        try:
+            app.skip_update()
+            self.assertEqual(app.settings["skipped_version"], "1.0.1")
+            self.assertIsNone(app.update_info)
+            self.assertEqual(exe.read_bytes(), b"OLD")
+        finally:
+            app.quit()
+            cleanup()
+            try:
+                self._pump(root, lambda: False, timeout=0.5)
             except tk.TclError:
                 pass
 

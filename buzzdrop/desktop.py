@@ -86,8 +86,9 @@ def _ver(v: str) -> Tuple[int, ...]:
 def check_for_update(timeout: float = 8.0) -> Optional[dict]:
     """``{"version", "url"}`` if a newer GitHub release exists, else None."""
     from .api import USER_AGENT, ssl_context
+    from .updater import ASSET_NAME, CHECKSUMS_NAME, api_base, release_assets
     req = urllib.request.Request(
-        "https://api.github.com/repos/%s/releases/latest" % REPO,
+        "%s/repos/%s/releases/latest" % (api_base(), REPO),
         headers={"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
@@ -97,5 +98,8 @@ def check_for_update(timeout: float = 8.0) -> Optional[dict]:
         return None
     tag = str(data.get("tag_name") or "")
     if tag and _ver(tag) > _ver(__version__):
-        return {"version": tag.lstrip("vV"), "url": data.get("html_url") or "https://github.com/%s/releases" % REPO}
+        assets = release_assets(data)
+        return {"version": tag.lstrip("vV"),
+                "url": data.get("html_url") or "https://github.com/%s/releases" % REPO,
+                "asset_url": assets.get(ASSET_NAME), "checksums_url": assets.get(CHECKSUMS_NAME)}
     return None

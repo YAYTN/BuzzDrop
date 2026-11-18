@@ -142,6 +142,7 @@ DEFAULTS: Dict[str, Any] = {
     "delete_zip_after_extract": True,    # fewer files lying around; the ZIP is kept if extracting fails
     "launch_folder_after_download": True,
     "watch_clipboard": True,             # offer to download links you copy
+    "open_blocked_in_browser": False,    # on a BuzzHeavier browser check: open the page automatically
     # Sending
     "copy_link": True,
     "link_style": "bz",                  # "bz" → BZ://code, "https" → https://buzzheavier.com/code
@@ -153,6 +154,8 @@ DEFAULTS: Dict[str, Any] = {
     "clear_clipboard_s": 0,              # >0: wipe the link BuzzDrop copied after this many seconds
     "notifications": True,
     "check_for_updates": True,
+    "auto_update": False,                # download updates in the background; they install when you next quit
+    "skipped_version": "",               # a version the user chose not to be reminded about
     "max_parallel": 2,
     # Windows extras
     "enable_global_hotkey": True,

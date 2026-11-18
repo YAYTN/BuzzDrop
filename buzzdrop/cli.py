@@ -42,6 +42,7 @@ Usage:
       --no-extract                Keep ZIP files zipped
       --json                      Machine-readable output
   buzz setup [--remove]         Register (or remove) BZ:// links, right-click menu, `buzz` command
+  buzz update [--check]         Look for a new version and (packaged Windows app) install it
   buzz --version
 
 Examples:
@@ -368,10 +369,60 @@ def launch_gui(argv: List[str]) -> int:
         server.close()
 
 
+def cmd_update(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog="buzz update", add_help=True)
+    p.add_argument("--check", action="store_true", help="only look for a new version")
+    a = p.parse_args(argv)
+
+    from . import updater
+    from .desktop import check_for_update
+    info = check_for_update()
+    if not info:
+        print("BuzzDrop %s is up to date." % __version__)
+        return 0
+    print("BuzzDrop %s is available (you have %s)." % (info["version"], __version__))
+    exe = updater.current_exe()
+    if a.check:
+        print(info["url"])
+        return 0
+    if not (exe and updater.offers_download(info) and updater.can_self_update(exe)):
+        print("This copy can't update itself. Download the new version from:\n  %s" % info["url"])
+        return 1
+    tty = bool(getattr(sys.stderr, "isatty", lambda: False)())
+
+    def progress(done: int, total: int) -> None:
+        if tty and total:
+            sys.stderr.write("\r  downloading %d%%" % (100 * done // total))
+            sys.stderr.flush()
+    new = exe.parent / "BuzzDrop.exe.new"
+    try:
+        new = updater.download_update(info, exe.parent, progress)
+        if tty:
+            sys.stderr.write("\r" + " " * 24 + "\r")
+        updater.preflight(new, info["version"])
+        updater.swap_in(exe, new)
+    except updater.UpdateError as exc:
+        updater._silent_unlink(new)
+        print("✗ %s" % exc, file=sys.stderr)
+        return 1
+    print("✓ Updated to %s. Start BuzzDrop again to use it." % info["version"])
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) >= 2 and argv[0] == "--after-update":
+        # Started by the app itself right after an update: wait for the old process to exit first.
+        try:
+            pid = int(argv[1])
+        except ValueError:
+            pid = 0
+        argv = argv[2:]
+        if pid:
+            from .updater import wait_for_exit
+            wait_for_exit(pid)
     head = argv[0] if argv else ""
-    commands = {"send": cmd_send, "get": cmd_get, "setup": cmd_setup}
+    commands = {"send": cmd_send, "get": cmd_get, "setup": cmd_setup, "update": cmd_update}
     if head in commands or head in ("-h", "--help", "help", "-V", "--version", "version",
                                     "--install", "--uninstall"):
         _attach_console()

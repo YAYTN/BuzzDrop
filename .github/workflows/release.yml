@@ -57,6 +57,8 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Checksums (the in-app updater verifies downloads against this file)
+        run: cd artifacts && sha256sum * > checksums.txt && cat checksums.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*

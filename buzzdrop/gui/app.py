@@ -18,7 +18,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional
 
-from .. import APP_ID, APP_NAME, REPO_URL, __version__, integration
+from .. import APP_ID, APP_NAME, REPO_URL, __version__, integration, updater
 from ..config import History, data_dir, download_dir, load_settings, save_settings
 from ..desktop import check_for_update, notify as desktop_notify, system_prefers_dark
 from ..transfers import CANCELLED, DONE, FAILED, QUEUED, RECEIVE, RUNNING, SEND, Job, TransferManager, describe
@@ -419,6 +419,12 @@ class App:
         self.page = "send"
         self.in_settings = False
         self.update_info: Optional[dict] = None
+        self._update_state = "idle"      # idle → downloading → ready (nothing restarts until the user says so)
+        self._update_pct = 0.0
+        self._update_file = None
+        self._update_applied = False
+        self._update_silent = False
+        self._can_update = None
         self.suggested: set = set()
         self._last_clip = None
         self._clip_check = 0.0
@@ -1055,6 +1061,9 @@ class App:
         row(card, "Show in folder when done", "", toggle("launch_folder_after_download"))
         row(card, "Offer to download copied links", "When you copy a BZ:// link, BuzzDrop offers to fetch it.",
             toggle("watch_clipboard"))
+        row(card, "Open blocked links in my browser", "If BuzzHeavier asks for a browser check, open the file's "
+            "page for me. Off by default: you get an \"Open in browser\" button instead.",
+            toggle("open_blocked_in_browser"))
 
         # -- Sending
         card = section("Sending")
@@ -1152,6 +1161,16 @@ class App:
             return f
         row(card, "%s %s" % (APP_NAME, __version__), "Free & open source · MIT licence", about_ctrl)
         row(card, "Check for updates automatically", "", toggle("check_for_updates"))
+        if self._self_update_possible():
+            row(card, "Download updates in the background", "The update installs the next time you close "
+                "BuzzDrop. Nothing restarts while you work.", toggle("auto_update"))
+        if self.update_info:
+            def skip_ctrl(parent):
+                f = tk.Frame(parent, bg=c.surface)
+                Button(f, ui, "Skip this version", small=True, kind="ghost", height=30, bg=c.surface,
+                       command=self.skip_update).pack(side="right")
+                return f
+            row(card, "Version %s is available" % self.update_info["version"], "", skip_ctrl)
 
         def links_ctrl(parent):
             f = tk.Frame(parent, bg=c.surface)
@@ -1209,14 +1228,34 @@ class App:
             self.shell.set_hotkey(self.settings.get("global_hotkey", "Ctrl+Shift+F1") if enabled else None)
 
     # ---------------------------------------------------------------- updates
+    def _self_update_possible(self) -> bool:
+        """The packaged Windows exe in a writable folder can update itself; everything else just links to the page."""
+        if self._can_update is None:
+            self._can_update = updater.can_self_update()
+        return self._can_update
+
     def _render_update_pill(self) -> None:
         for w in self.update_slot.winfo_children():
             w.destroy()
-        if self.update_info:
-            info = self.update_info
-            Button(self.update_slot, self.ui, "Update to %s" % info["version"], icon="download", kind="soft",
-                   small=True, height=30, command=lambda: open_url(info["url"]),
-                   tooltip="A new version is available").pack()
+        info = self.update_info
+        if not info:
+            return
+        slot, ui = self.update_slot, self.ui
+        if self._update_state == "downloading":
+            Button(slot, ui, "Updating %d%%" % int(self._update_pct * 100), kind="soft", small=True, height=30,
+                   command=lambda: None, tooltip="Downloading the update. Nothing restarts.").pack()
+        elif self._update_state == "ready":
+            Button(slot, ui, "Restart to finish", icon="retry", kind="soft", small=True, height=30,
+                   command=self.restart_for_update,
+                   tooltip="Installs %s. It also installs by itself the next time you close BuzzDrop."
+                   % info["version"]).pack()
+        elif updater.offers_download(info) and self._self_update_possible():
+            Button(slot, ui, "Update to %s" % info["version"], icon="download", kind="soft", small=True, height=30,
+                   command=self.start_update_download,
+                   tooltip="Download it now. Nothing restarts until you choose.").pack()
+        else:
+            Button(slot, ui, "Update to %s" % info["version"], icon="download", kind="soft", small=True, height=30,
+                   command=lambda: open_url(info["url"]), tooltip="A new version is available").pack()
 
     def _check_updates(self, manual: bool) -> None:
         def work() -> None:
@@ -1225,15 +1264,132 @@ class App:
             def done() -> None:
                 self.settings["last_update_check"] = time.time()
                 save_settings(self.settings)
-                if info:
+                if not info:
+                    if manual:
+                        self.toast("You're on the latest version.", "success")
+                    return
+                if info["version"] == self.settings.get("skipped_version") and not manual:
+                    return  # the user chose not to be reminded about this one
+                same = bool(self.update_info) and self.update_info.get("version") == info["version"]
+                if not same:
                     self.update_info = info
-                    self._render_update_pill()
-                    self.toast("BuzzDrop %s is available" % info["version"], "info",
-                               action=("Get it", lambda: open_url(info["url"])), duration=8000)
-                elif manual:
-                    self.toast("You're on the latest version.", "success")
+                    self._update_state, self._update_pct, self._update_file = "idle", 0.0, None
+                self._render_update_pill()
+                can = updater.offers_download(info) and self._self_update_possible()
+                if same and self._update_state != "idle":
+                    return  # already downloading / waiting for the restart
+                if can and self.settings.get("auto_update") and not self.manager.busy:
+                    self._update_silent = True      # opted in: fetch it quietly, install on the next quit
+                    self.start_update_download()
+                    return
+                self.toast("BuzzDrop %s is available" % info["version"], "info",
+                           action=("Update", self.start_update_download) if can
+                           else ("Get it", lambda: open_url(info["url"])), duration=8000)
             self.main_q.put(done)
         threading.Thread(target=work, daemon=True).start()
+
+    # -- one-click update (never restarts by itself)
+    def start_update_download(self) -> None:
+        info = self.update_info
+        if not info or self._update_state != "idle":
+            return
+        exe = updater.current_exe()
+        if exe is None or not updater.offers_download(info) or not self._self_update_possible():
+            open_url(info["url"])
+            return
+        self._update_state, self._update_pct = "downloading", 0.0
+        self._render_update_pill()
+        last = [0.0]
+
+        def progress(done: int, total: int) -> None:
+            now = time.monotonic()
+            if total and now - last[0] > 0.3:
+                last[0] = now
+                self.main_q.put(lambda p=done / total: self._set_update_progress(p))
+
+        def work() -> None:
+            try:
+                new = updater.download_update(info, exe.parent, progress)
+                try:
+                    updater.preflight(new, info["version"])      # prove it starts before offering it
+                except updater.UpdateError:
+                    updater._silent_unlink(new)
+                    raise
+            except updater.UpdateError as exc:
+                msg = str(exc)
+                self.main_q.put(lambda: self._update_failed(msg))
+                return
+            self.main_q.put(lambda: self._update_ready(new))
+        threading.Thread(target=work, daemon=True, name="update").start()
+
+    def _set_update_progress(self, pct: float) -> None:
+        self._update_pct = pct
+        if self._update_state == "downloading":
+            self._render_update_pill()
+
+    def _update_failed(self, msg: str) -> None:
+        log.warning("update failed: %s", msg)
+        self._update_state = "idle"
+        self._render_update_pill()
+        if not self._update_silent and self.update_info:
+            url = self.update_info["url"]
+            self.toast(msg, "error", action=("Open page", lambda: open_url(url)), duration=9000)
+        self._update_silent = False
+
+    def _update_ready(self, new) -> None:
+        self._update_state, self._update_file = "ready", new
+        self._render_update_pill()
+        if not self._update_silent:
+            self.toast("BuzzDrop %s is ready. Restart whenever you like." % self.update_info["version"], "success",
+                       action=("Restart", self.restart_for_update), duration=8000)
+        self._update_silent = False
+
+    def restart_for_update(self) -> None:
+        if self._update_state != "ready" or self._update_applied or not self._update_file:
+            return
+        if self.manager.busy and not messagebox.askyesno(
+                APP_NAME, "Transfers are still running.\nCancel them and restart to update?",
+                icon="warning", parent=self.root):
+            return
+        exe = updater.current_exe()
+        try:
+            updater.swap_in(exe, self._update_file)
+        except updater.UpdateError as exc:
+            self.toast(str(exc), "error", duration=7000)
+            return
+        self._update_applied = True
+        try:
+            updater.relaunch(exe, os.getpid())
+        except OSError as exc:
+            log.warning("could not relaunch: %s", exc)
+            self.toast("Updated. Close and reopen BuzzDrop to use the new version.", "success", duration=9000)
+            return
+        self.quit()
+
+    def _apply_pending_update(self) -> None:
+        """A downloaded update installs by itself when the app is closed for real (no restart)."""
+        if self._update_state != "ready" or self._update_applied or not self._update_file:
+            return
+        exe = updater.current_exe()
+        try:
+            updater.swap_in(exe, self._update_file)
+            self._update_applied = True
+            log.info("installed update on quit")
+        except Exception as exc:
+            log.warning("could not install the update on quit: %s", exc)
+
+    def skip_update(self) -> None:
+        info = self.update_info
+        if not info:
+            return
+        self._save("skipped_version", info["version"])
+        if self._update_file:
+            updater._silent_unlink(self._update_file)
+        self.update_info, self._update_state, self._update_file = None, "idle", None
+        self._render_update_pill()
+        self.toast("OK, I won't remind you about %s." % info["version"], "info")
+        if self.in_settings:
+            self.rebuild(settings_open=True)
 
     def check_updates_now(self) -> None:
         self.toast("Checking for updates…", "info", duration=2000)
@@ -1378,6 +1534,12 @@ class App:
             threading.Thread(target=integration.heal, daemon=True).start()
         if s.get("check_for_updates", True) and time.time() - float(s.get("last_update_check") or 0) > 86400:
             self._check_updates(manual=False)
+        exe = updater.current_exe()
+        if exe is not None:  # once the app has run fine for a while, drop the previous version's backup
+            def tidy() -> None:
+                if self._update_state == "idle":
+                    threading.Thread(target=updater.cleanup_leftovers, args=(exe,), daemon=True).start()
+            self.root.after(30000, tidy)
         if not self.background:
             self._check_clipboard(force=True)
 
@@ -1463,7 +1625,7 @@ class App:
                        action=("Show", lambda: self.reveal(target)))
             self.notify("Download complete", os.path.basename(target or ""))
         elif job.state == FAILED:
-            if job.blocked and self._auto_open_budget():
+            if job.blocked and self.settings.get("open_blocked_in_browser") and self._auto_open_budget():
                 # BuzzHeavier wants a real browser for this file: hand it over right away.
                 open_url(web_link(job.code))
                 self.toast("BuzzHeavier asked for a browser check — opened the link in your browser.", "info",
@@ -1574,6 +1736,7 @@ class App:
             return
         self._save_geometry()
         self._closing = True
+        self._apply_pending_update()
         if self.server is not None:
             self.server.close()  # new launches must not hand their link to a closing window
         self.manager.cancel_all()

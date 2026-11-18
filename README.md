@@ -53,7 +53,8 @@ On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send wit
 **Everything else**
 - History of everything you sent and received, with search and one-click copy
 - Light / dark / follow-system theme, six accent colors and five background styles (Default, Ocean, Neutral, Warm, Pure black/white), crisp on high-DPI screens, matching title bar on Windows 11
-- Tray icon + start at login (Windows), desktop notifications, update notifications
+- Tray icon + start at login (Windows), desktop notifications
+- **Quiet updates:** a small "Update to x.y.z" button appears in the header. One click downloads it in the background (checked against the release's SHA-256 and test-started first); nothing restarts until you choose **Restart to finish** or close BuzzDrop. Optional: download updates automatically, or **Skip this version**. The macOS and Linux apps only tell you a new version exists
 - A real **command line** for scripts and SSH sessions (`--json` output)
 - Portable mode: put a file named `portable` next to the `.exe` and all settings stay in `./data`
 - ~30 MB RAM and 0 % CPU while idle
@@ -78,6 +79,7 @@ Turn on **Settings → `buzz` terminal command** (or install with `pipx`) and op
 buzz send FILE_OR_FOLDER...   [--note TEXT] [--zip] [--https] [--no-copy] [--json]
 buzz get  LINK_OR_CODE...     [-o DIR] [--no-extract] [--json]
 buzz setup [--remove]         register / remove BZ:// links, right-click menu, buzz command
+buzz update [--check]         look for a new version and install it (packaged Windows app)
 buzz                          open the app
 ```
 
@@ -96,7 +98,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 
 - Uploads use BuzzHeavier's [public API](https://buzzheavier.com/developers) (`PUT https://w.buzzheavier.com/<name>`), streamed from disk — memory use stays flat for any file size.
 - Downloads open the public page for the code, follow its signed download link and stream to `name.part`, which is renamed only when complete.
-- BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/2.x`). BuzzHeavier sometimes asks programs that aren't browsers to pass a browser check. BuzzDrop never tries to get around that: it opens the file's page in your own browser for you (a download there works as usual), and the **Open in browser** button stays on the transfer in case you closed the tab.
+- BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/2.x`). BuzzHeavier sometimes asks programs that aren't browsers to pass a browser check. BuzzDrop never tries to get around that or pretends to be a browser: the transfer shows an **Open in browser** button (a download there works as usual), and an optional setting opens the page for you automatically.
 - The only other connection is a once-a-day look at this repo's latest GitHub release (switch off in Settings).
 - Settings, history and logs live in `%LOCALAPPDATA%\BuzzDrop` (Windows), `~/Library/Application Support/BuzzDrop` (macOS) or `~/.config/buzzdrop` (Linux).
 
@@ -105,7 +107,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 | Problem | Fix |
 |---|---|
 | The hotkey does nothing | Another app owns it — BuzzDrop tells you; pick a new one in **Settings → Global hotkey**. |
-| “Open in your browser” error | BuzzHeavier wanted a browser check for that file. BuzzDrop opens it in your browser for you; if you closed the tab, click **Open in browser** on the transfer. |
+| “Open in your browser” error | BuzzHeavier wanted a browser check for that file. Click **Open in browser** on the transfer (or turn on **Settings → Open blocked links in my browser**). |
 | Linux from source: “needs Tk” | `sudo apt install python3-tk` (Debian/Ubuntu) or `sudo dnf install python3-tkinter` (Fedora). The prebuilt binary already includes it. |
 | macOS from source: “needs Tk 8.6” | Apple's built-in Python ships an old Tk — use the packaged app or Python from python.org. |
 | BZ:// links stopped opening after moving the app | Open the app once from its new location — it re-points the links automatically. |

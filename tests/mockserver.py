@@ -63,6 +63,9 @@ class _Handler(BaseHTTPRequestHandler):
         name = urllib.parse.unquote(parts.path.lstrip("/"))
         note = urllib.parse.parse_qs(parts.query).get("note", [None])[0]
         length = int(self.headers.get("Content-Length", 0))
+        if length == 0:  # the real BuzzHeavier refuses empty uploads with 411
+            self._send(411, json.dumps({"code": 411, "error": "Length Required"}).encode(), "application/json")
+            return
         received = bytearray()
         if self.server.reset_uploads_times > 0:
             self.server.reset_uploads_times -= 1

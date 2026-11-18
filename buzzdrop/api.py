@@ -87,6 +87,11 @@ class FileError(BuzzError):
     title = "Can't save the file"
 
 
+class EmptyFileError(BuzzError):
+    """BuzzHeavier answers a 0-byte upload with HTTP 411, so we say so before trying."""
+    title = "Can't send an empty file"
+
+
 def _file_error(exc: OSError, folder: Path) -> FileError:
     if exc.errno == 28:  # ENOSPC
         return FileError("Your disk is full.")
@@ -230,6 +235,8 @@ def _http_error(exc: urllib.error.HTTPError, what: str) -> BuzzError:
         return NotFoundError("This file doesn't exist anymore — it may have expired or been deleted.")
     if exc.code == 429:
         return ServerError("BuzzHeavier is rate-limiting requests. Wait a minute and try again.")
+    if exc.code == 411:
+        return ServerError("BuzzHeavier doesn't accept empty files (it answered \"Length Required\").")
     if exc.code == 413:
         return ServerError("BuzzHeavier rejected the file because it is too large.")
     detail = ""
@@ -277,6 +284,9 @@ class Client:
         if offset < 0 or offset + length > size:
             raise BuzzError("The file changed while it was being uploaded.")
         size = length  # everything below works on the number of bytes actually sent
+        if size == 0:
+            raise EmptyFileError("“%s” is empty (0 bytes), and BuzzHeavier doesn't accept empty files. "
+                                 "Add some content and try again." % path.name)
         name = (name or path.name).strip() or "file"
         if len(name) > 250:
             root, ext = os.path.splitext(name)

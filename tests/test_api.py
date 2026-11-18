@@ -41,11 +41,30 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(res.code.startswith("up"))
         self.assertEqual(seen[-1], (len(data), len(data)))
 
-    def test_upload_empty_file(self):
+    def test_empty_file_is_refused_with_a_clear_message_before_any_request(self):
+        from buzzdrop.api import EmptyFileError
         f = self.dir / "empty.txt"
         f.write_bytes(b"")
-        res = self.client.upload(f)
-        self.assertEqual(res.size, 0)
+        with self.assertRaises(EmptyFileError) as ctx:
+            self.client.upload(f)
+        self.assertIn("empty", str(ctx.exception))
+        self.assertEqual(self.srv.uploads, [])             # nothing was sent to the server
+        job = Job(SEND, "empty.txt", paths=[str(f)])
+        execute(job, self.client, {})
+        self.assertEqual(job.state, FAILED)
+        self.assertEqual(job.error_title, "Can't send an empty file")
+
+    def test_the_server_s_411_for_empty_uploads_is_explained(self):
+        import io
+        import urllib.error
+        from buzzdrop.api import _http_error
+        err = urllib.error.HTTPError("https://w.example/x", 411, "Length Required", {}, io.BytesIO(b'{"code":411}'))
+        self.assertIn("empty", str(_http_error(err, "Upload")))
+
+    def test_a_one_byte_file_is_fine(self):
+        f = self.dir / "tiny.txt"
+        f.write_bytes(b"x")
+        self.assertEqual(self.client.upload(f).size, 1)
 
     def test_upload_cancel(self):
         f = self.dir / "big.bin"

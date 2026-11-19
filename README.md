@@ -32,15 +32,16 @@ Tiny (~12 MB) · zero dependencies · Windows · macOS · Linux
 
 *The Windows and Linux apps are tested automatically. The macOS app is built the same way but hasn't been tried on a real Mac yet; please [report](https://github.com/YAYTN/BuzzDrop/issues) anything that doesn't work.*
 
-On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send with BuzzDrop”** to your right-click menu. Everything is per-user (no admin) and can be switched off in **Settings → System integration**.
+On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send with BuzzDrop”** to your right-click menu. On Windows it also adds a Start menu shortcut and the `buzz` terminal command, and keeps BuzzDrop in the tray, starting at login, so your hotkey always works. Everything is per-user (no admin) and every one of these can be switched off in **Settings**.
+
 ## Features
 
 **Send**
 - Drop files or folders on the window, click to browse, **paste files with Ctrl+V**, or right-click → *Send with BuzzDrop*
 - Folders and multi-file bundles are zipped on the fly (already-compressed files are stored, not re-compressed)
-- The link is **copied automatically** — choose `BZ://` links or plain `https://` links that are clickable in every chat app
+- The link is **copied automatically** — plain `https://` links that are clickable in every chat app (the default) or `BZ://` links that open BuzzDrop
 - Optional note shown on the download page
-- *Optional:* clear the copied link from your clipboard after 30 s / 1 min / 5 min — only if you haven't copied anything else since
+- The copied link is **cleared from your clipboard after 30 s** (or 1 min / 5 min, or never) — only if you haven't copied anything else since, and only what BuzzDrop copied
 - Select 50 files in Explorer → one window, not 50
 - A dropped connection never costs you the upload: it restarts by itself (up to 3 times) and you still get one normal link that works in any browser
 - *Optional:* **Settings → Split very large uploads** (or `buzz send --split MB`) sends big files in separate parts, so a drop only repeats one part. BuzzDrop rejoins them and checks every part; `buzz send` also prints a plain link for each part, so nobody needs BuzzDrop to get the file. Off by default
@@ -53,10 +54,11 @@ On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send wit
 - Saves to your real Downloads folder, even if you moved it
 
 **Everything else**
-- History of everything you sent and received, with search and one-click copy. *Optional privacy setting:* forget it automatically when you quit, or after 1 / 7 / 30 days (only the list is cleared, never your files or links). Off by default
-- Light / dark / follow-system theme, six accent colors and five background styles (Default, Ocean, Neutral, Warm, Pure black/white), crisp on high-DPI screens, matching title bar on Windows 11
-- Tray icon + start at login (Windows), desktop notifications
-- **Quiet updates:** a small "Update to x.y.z" button appears in the header. One click downloads it in the background (checked against the release's SHA-256 and test-started first); nothing restarts until you choose **Restart to finish** or close BuzzDrop. Optional: download updates automatically, or **Skip this version**. The macOS and Linux apps only tell you a new version exists
+- **Pause and resume** any upload or download while BuzzDrop is open. Nothing about it is saved to disk
+- History of everything you sent and received, with search and one-click copy. **Privacy:** by default it is forgotten when you quit BuzzDrop; you can instead keep it, or forget it after 1 / 7 / 30 days (only the list is cleared, never your files or links)
+- Light / dark / follow-system theme (follows your system by default), six accent colors and five background styles (Default, Ocean, Neutral, Warm, Pure black/white), crisp on high-DPI screens, matching title bar on Windows 11
+- Tray icon + start at login (Windows), and a desktop notification when a transfer finishes while you're in another app — all on by default and all switchable in Settings
+- **Automatic updates (Windows):** new versions download quietly (checked against the release's SHA-256 and test-started first) and install while BuzzDrop is idle in the tray: window closed, nothing transferring. It then comes back up in the tray; it never restarts while the window is open or a transfer is running. Prefer to decide yourself? Turn off **Settings → Update automatically** and use the "Update to x.y.z" button in the header instead, or **Skip this version**. The macOS and Linux apps only tell you a new version exists
 - A real **command line** for scripts and SSH sessions (`--json` output)
 - Portable mode: put a file named `portable` next to the `.exe` and all settings stay in `./data`
 - ~30 MB RAM and 0 % CPU while idle
@@ -75,7 +77,7 @@ On first launch BuzzDrop makes **BZ:// links open in it** and adds **“Send wit
 
 ## Command line
 
-Turn on **Settings → `buzz` terminal command** (or install with `pipx`) and open a new terminal. On Windows `bz` works too as a shorter alias.
+On Windows the `buzz` command is set up for you (or turn it on under **Settings → `buzz` terminal command**; with `pipx` it is installed for you). Open a new terminal after that. On Windows `bz` works too as a shorter alias.
 
 ```text
 buzz send FILE_OR_FOLDER...   [--note TEXT] [--zip] [--https] [--no-copy] [--json]
@@ -102,8 +104,8 @@ The terminal commands never load the GUI, so they also work on headless servers.
 - Uploads use BuzzHeavier's [public API](https://buzzheavier.com/developers) (`PUT https://w.buzzheavier.com/<name>`), streamed from disk — memory use stays flat for any file size.
 - Files sent without an account don't stay forever: BuzzHeavier removes them after a few days (it reported about four days when this was written, and BuzzHeavier can change that). Share the link soon after uploading, and send the file again if a link has expired.
 - Downloads open the public page for the code, follow its signed download link and stream to `name.part`, which is renamed only when complete.
-- BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/2.x`). BuzzHeavier sometimes asks programs that aren't browsers to pass a browser check. BuzzDrop never tries to get around that or pretends to be a browser: the transfer shows an **Open in browser** button (a download there works as usual), and an optional setting opens the page for you automatically.
-- The only other connection is a once-a-day look at this repo's latest GitHub release (switch off in Settings).
+- BuzzDrop identifies itself honestly (`User-Agent: BuzzDrop/<version>`). BuzzHeavier sometimes asks programs that aren't browsers to pass a browser check. BuzzDrop never tries to get around that or pretends to be a browser: the transfer shows an **Open in browser** button (a download there works as usual), and by default BuzzDrop opens that page for you (you can turn this off in Settings).
+- The only other connection is a once-a-day look at this repo's latest GitHub release (switch off in Settings). With **Update automatically** on, a newer version is also downloaded from that release.
 - Settings, history and logs live in `%LOCALAPPDATA%\BuzzDrop` (Windows), `~/Library/Application Support/BuzzDrop` (macOS) or `~/.config/buzzdrop` (Linux).
 
 ## Troubleshooting
@@ -111,7 +113,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 | Problem | Fix |
 |---|---|
 | The hotkey does nothing | Another app owns it — BuzzDrop tells you; pick a new one in **Settings → Global hotkey**. |
-| “Open in your browser” error | BuzzHeavier wanted a browser check for that file. Click **Open in browser** on the transfer (or turn on **Settings → Open blocked links in my browser**). |
+| “Open in your browser” error | BuzzHeavier wanted a browser check for that file. BuzzDrop opens that page in your browser for you (**Settings → Open blocked links in my browser**). If you turned that off, click **Open in browser** on the transfer. |
 | Linux from source: “needs Tk” | `sudo apt install python3-tk` (Debian/Ubuntu) or `sudo dnf install python3-tkinter` (Fedora). The prebuilt binary already includes it. |
 | macOS from source: “needs Tk 8.6” | Apple's built-in Python ships an old Tk — use the packaged app or Python from python.org. |
 | BZ:// links stopped opening after moving the app | Open the app once from its new location — it re-points the links automatically. |
@@ -123,7 +125,7 @@ The terminal commands never load the GUI, so they also work on headless servers.
 
 ```bash
 python BuzzDrop.pyw                                 # run from source (no packages needed)
-python -m unittest discover -s tests -t .           # 70 tests, offline (local mock server)
+python -m unittest discover -s tests -t .           # offline tests (local mock server)
 BUZZ_GUI_TESTS=1 python -m unittest tests.test_gui  # end-to-end GUI test
 pip install pyinstaller && python packaging/build.py  # standalone app for this OS
 ```

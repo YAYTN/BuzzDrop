@@ -243,6 +243,8 @@ ICONS: Dict[str, Callable[[float, float], float]] = {
     "moon": lambda x, y: abs(max(d_circle(x, y, 12, 12, 9), -d_circle(x, y, 17.5, 6.5, 6.6))) - S,
     "keyboard": lambda x, y: min(abs(d_box(x, y, 12, 12, 10, 7, 2)), d_seg(x, y, 8, 15.5, 16, 15.5),
                                  *(d_seg(x, y, kx, ky, kx + 0.01, ky) for kx in (6.5, 10, 13.5, 17.5) for ky in (8.5, 12))) - S,
+    "pause": lambda x, y: min(d_seg(x, y, 8.5, 5.5, 8.5, 18.5), d_seg(x, y, 15.5, 5.5, 15.5, 18.5)) - 1.5,
+    "play": lambda x, y: d_poly(x, y, _p((8, 5), (19, 12), (8, 19), (8, 5))) - S,
     "zap": lambda x, y: d_poly(x, y, _p((13, 2), (4, 14), (12, 14), (11, 22), (20, 10), (12, 10), (13, 2))) - S,
 }
 

@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
 import webbrowser
@@ -40,6 +41,52 @@ class Cancelled(Exception):
 def _check(cancel) -> None:
     if cancel is not None and cancel.is_set():
         raise Cancelled()
+
+
+class StopFlag(threading.Event):
+    """A cancel flag that can also be paused. Everything lives in memory; nothing is written anywhere.
+
+    Long loops already ask ``cancel.is_set()``; the ones that can pause (the upload body, the download
+    read loop, the gap between split parts) also call :func:`checkpoint`, which waits here while paused.
+    ``pauses`` counts how often it was paused, so a retry caused by a long pause (the server hung up on an
+    idle connection) can be recognised and not counted as a real failure.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._running = threading.Event()
+        self._running.set()
+        self.pauses = 0
+
+    @property
+    def paused(self) -> bool:
+        return not self._running.is_set()
+
+    def pause(self) -> None:
+        if self._running.is_set():
+            self.pauses += 1
+            self._running.clear()
+
+    def resume(self) -> None:
+        self._running.set()
+
+    def set(self) -> None:          # cancelling must also release a paused transfer
+        super().set()
+        self._running.set()
+
+    def wait_if_paused(self) -> bool:
+        """Block while paused (or until cancelled). Returns True if it had to wait."""
+        waited = False
+        while not self._running.is_set() and not super().is_set():
+            waited = True
+            self._running.wait(0.1)
+        return waited
+
+
+def checkpoint(flag) -> bool:
+    """Wait here while *flag* is paused. Plain ``threading.Event`` flags (CLI, tests) never pause."""
+    wait = getattr(flag, "wait_if_paused", None)
+    return bool(wait()) if wait else False
 
 
 # --------------------------------------------------------------------------

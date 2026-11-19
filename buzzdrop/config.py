@@ -248,6 +248,19 @@ class History:
             self.items = []
             write_json(self.path, [])
 
+    def restore(self, old: List[Dict[str, Any]]) -> None:
+        """Put back entries that were just cleared (the "Undo" after Clear history).
+
+        Anything added in the meantime is kept; nothing appears twice; newest first.
+        """
+        with FileLock(self.path.with_suffix(".lock"), timeout=3):
+            current = self._read()
+            seen = {(i.get("time"), i.get("code")) for i in current}
+            merged = current + [i for i in old if (i.get("time"), i.get("code")) not in seen]
+            merged.sort(key=lambda i: i.get("time") if isinstance(i.get("time"), (int, float)) else 0, reverse=True)
+            self.items = merged[:MAX_HISTORY]
+            write_json(self.path, self.items)
+
     def older_than(self, days: float, now: Optional[float] = None) -> int:
         """How many entries are older than *days* days (entries without a valid time are never counted)."""
         cutoff = (time.time() if now is None else now) - days * 86400

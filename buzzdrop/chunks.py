@@ -33,7 +33,7 @@ from typing import Callable, List, Optional
 from . import REPO_URL
 from .api import (BuzzError, CancelledError, Client, DownloadResult, FileError, NetworkError, ProgressFn,
                   ServerError, UploadResult, _file_error)
-from .util import disk_free, format_size, safe_filename, unique_path
+from .util import checkpoint, disk_free, format_size, safe_filename, unique_path
 
 log = logging.getLogger("buzz")
 
@@ -167,16 +167,22 @@ def upload_chunked(client: Client, path: Path, chunk: int, note: Optional[str] =
         part_name = "%s.%03d" % (name, index) if len(plan) < 1000 else "%s.%04d" % (name, index)
         attempt = 0
         while True:
+            checkpoint(cancel)                         # a pause between parts waits here
             if status:
                 status("Uploading part %d of %d…" % (index, len(plan)))
             digest = hashlib.sha256()
+            pauses_before = getattr(cancel, "pauses", 0)
             try:
                 res = client.upload(
                     path, name=part_name, cancel=cancel, offset=offset, length=length, digest=digest,
                     progress=(lambda d, t, base=offset: progress(base + d, size)) if progress else None)
                 break
             except BuzzError as exc:
-                if not _retriable(exc) or attempt >= retries:
+                if not _retriable(exc):
+                    raise
+                if getattr(cancel, "pauses", 0) != pauses_before:
+                    continue                           # hung up during a pause: start this part again, no retry used
+                if attempt >= retries:
                     raise
                 attempt += 1
                 wait = min(client.retry_delay * 2 ** (attempt - 1), 15.0)

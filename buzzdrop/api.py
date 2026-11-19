@@ -40,7 +40,8 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from . import REPO_URL, __version__
-from .util import Cancelled, disk_free, filename_from_disposition, format_size, safe_filename, unique_path
+from .util import (Cancelled, checkpoint, disk_free, filename_from_disposition, format_size, safe_filename,
+                   unique_path)
 
 log = logging.getLogger("buzz")
 
@@ -70,8 +71,12 @@ class NotFoundError(BuzzError):
     title = "File not available"
 
 
+BLOCKED_MESSAGE = ("BuzzHeavier asks for a quick check in a web browser before this file can be downloaded. "
+                   "Open the link in your browser and download it from there.")
+
+
 class BlockedError(BuzzError):
-    title = "Open in your browser"
+    title = "Needs your browser"
 
 
 class ServerError(BuzzError):
@@ -229,8 +234,7 @@ def _http_error(exc: urllib.error.HTTPError, what: str) -> BuzzError:
         except Exception:
             pass
     if _looks_like_challenge(exc.headers, body):
-        return BlockedError("BuzzHeavier wants a browser check for this request. "
-                            "Open the link in your browser to continue.")
+        return BlockedError(BLOCKED_MESSAGE)
     if exc.code in (404, 410):
         return NotFoundError("This file doesn't exist anymore — it may have expired or been deleted.")
     if exc.code == 429:
@@ -310,6 +314,7 @@ class Client:
                 if offset:
                     fh.seek(offset)
                 while sent < size:
+                    checkpoint(cancel)                 # stands still while paused
                     if cancel is not None and cancel.is_set():
                         raise CancelledError("Upload cancelled.")
                     chunk = fh.read(min(UPLOAD_CHUNK, size - sent))
@@ -390,8 +395,7 @@ class Client:
         except (OSError, http.client.HTTPException) as exc:
             raise NetworkError(_reason(exc))
         if _looks_like_challenge(headers, text):
-            raise BlockedError("BuzzHeavier wants a browser check for this file. "
-                               "Open the link in your browser to continue.")
+            raise BlockedError(BLOCKED_MESSAGE)
         m = re.search(r"/" + re.escape(code) + r"/download\?t=([^\"'<>\s]+)", text)
         if not m:
             raise NotFoundError("This file doesn't exist anymore — it may have expired or been deleted.")
@@ -427,6 +431,7 @@ class Client:
             while True:
                 if stop_requested():
                     raise CancelledError("Download cancelled.")
+                pauses_before = getattr(cancel, "pauses", 0)
                 try:
                     url, page, hint = self.resolve(code, opener)
                     headers = {"User-Agent": USER_AGENT, "Accept": "*/*", "Referer": page}
@@ -444,8 +449,7 @@ class Client:
                         if "text/html" in ctype and not disposition:
                             peek = resp.read(20000).decode("utf-8", "replace")
                             if _looks_like_challenge(resp.headers, peek):
-                                raise BlockedError("BuzzHeavier wants a browser check for this file. "
-                                                   "Open the link in your browser to continue.")
+                                raise BlockedError(BLOCKED_MESSAGE)
                             raise ServerError("BuzzHeavier returned a web page instead of the file.")
                         if name is None:
                             name, part_name = _fit_names(
@@ -476,6 +480,7 @@ class Client:
                         read = getattr(resp, "read1", None) or resp.read
                         with out:
                             while True:
+                                checkpoint(cancel)     # stands still while paused
                                 if stop_requested():
                                     raise CancelledError("Download cancelled.")
                                 chunk = read(CHUNK)
@@ -505,6 +510,13 @@ class Client:
                     err = NetworkError(_reason(exc))
                 except (OSError, http.client.HTTPException) as exc:  # socket-level (file errors are FileError)
                     err = NetworkError(_reason(exc))
+                if getattr(cancel, "pauses", 0) != pauses_before:
+                    # The server hung up while the download was paused. That's no failure: carry on from
+                    # where it stopped, without using up one of the retries.
+                    log.info("Download %s: connection closed during a pause; resuming", code)
+                    if status:
+                        status("Resuming…")
+                    continue
                 attempt += 1
                 if attempt > retries:
                     raise err

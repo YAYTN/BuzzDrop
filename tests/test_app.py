@@ -153,6 +153,20 @@ class ConfigTests(TempData):
         h1.clear()
         self.assertEqual(config.History().items, [])
 
+    def test_cleared_history_can_be_put_back_without_duplicates(self):
+        now = time.time()
+        h = self._write_history(now)
+        before = [dict(e) for e in h.items]
+        h.clear()
+        self.assertEqual(config.History().items, [])                   # really gone from disk straight away
+        newer = h.add("send", "added while the undo was available", "eeee55556666", 1)
+        h.restore(before)
+        names = [e["name"] for e in config.History().items]
+        self.assertEqual(len(names), 5)                                # 4 restored + the new one, none twice
+        self.assertEqual(names[0], newer["name"])                      # newest first
+        h.restore(before)                                              # pressing Undo twice changes nothing
+        self.assertEqual(len(config.History().items), 5)
+
     def test_downloads_dir_exists_or_is_home_based(self):
         d = config.default_downloads_dir()
         self.assertTrue(str(d))

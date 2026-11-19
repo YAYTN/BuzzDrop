@@ -209,7 +209,12 @@ class TransferRow(_Row):
     def _actions_for_state(self) -> List[tuple]:
         j, a = self.job, self.app
         if j.active:
-            return [("x", "Cancel", lambda: a.manager.cancel(j))]
+            acts = []
+            if j.paused:
+                acts.append(("play", "Resume", lambda: a.manager.resume(j)))
+            elif j.can_pause:
+                acts.append(("pause", "Pause", lambda: a.manager.pause(j)))
+            return acts + [("x", "Cancel", lambda: a.manager.cancel(j))]
         remove = ("x", "Remove from list", lambda: a.remove_row(j))
         if j.state == DONE and j.kind == SEND:
             code = j.result["code"]
@@ -237,7 +242,7 @@ class TransferRow(_Row):
         if not self.w:
             return
         j, ui, c = self.job, self.ui, self.ui.c
-        key = (j.state, j.blocked, j.label, bool(j.result))
+        key = (j.state, j.blocked, j.label, bool(j.result), j.paused, j.can_pause)
         if key != self._key or force:
             self._key = key
             self.delete("badge", "text", "action", "bar")
@@ -249,7 +254,9 @@ class TransferRow(_Row):
             else:
                 ext = _ext_badge(j.label)
                 badge = (ext, None if ext else "file")
-            if j.state == FAILED:
+            if j.state == FAILED and j.blocked:
+                self.draw_badge(None, "external", c.info_soft, c.info)       # not an error: just needs a browser
+            elif j.state == FAILED:
                 self.draw_badge(None, "alert", c.danger_soft, c.danger)
             elif j.state == DONE:
                 self.draw_badge(badge[0], badge[1], c.accent_soft, c.accent_ink)
@@ -279,14 +286,14 @@ class TransferRow(_Row):
                                                 font=ui.f.small, fill=c.text3, tags="text",
                                                 text="  ·  " + format_size(j.result.get("size", 0)))
         else:
-            color = {FAILED: c.danger, CANCELLED: c.text3}.get(j.state, c.text2)
+            color = {FAILED: c.text2 if j.blocked else c.danger, CANCELLED: c.text3}.get(j.state, c.text2)
             self.itemconfigure(self.status, text=ellipsize(ui.f.small, describe(j), avail, middle=False), fill=color)
         if j.active:
             y = self.ch - ui.px(9)
             width = self.ax - ui.px(6) - self.x0
             frac = j.fraction
             if frac is None:
-                if j.state == RUNNING:  # indeterminate shimmer
+                if j.state == RUNNING and not j.paused:  # indeterminate shimmer
                     p = (time.monotonic() * 0.7) % 1.4 - 0.4
                     a, b = max(0.0, p), min(1.0, p + 0.4)
                     self.coords(self.fill, self.x0 + a * width, y, self.x0 + max(a, b) * width, y)
@@ -295,6 +302,7 @@ class TransferRow(_Row):
             else:
                 self._frac += (frac - self._frac) * 0.35 if frac >= self._frac else (frac - self._frac)
                 self.coords(self.fill, self.x0, y, self.x0 + max(0.0, self._frac) * width, y)
+            self.itemconfigure(self.fill, fill=c.text3 if j.paused else c.accent)   # dimmed while paused
 
 
 class HistoryRow(_Row):
@@ -964,12 +972,33 @@ class App:
         self._render_history()
 
     def clear_history(self) -> None:
+        """Clear the list right away, with a few seconds to undo (no question first).
+
+        Only the list is cleared, never files or shared links. The copy kept for "Undo" lives in memory
+        only and is dropped when the toast goes away, so nothing about it stays anywhere.
+        """
         if not self.history.items:
             return
-        if messagebox.askyesno(APP_NAME, "Clear your whole transfer history?\n(Files are not deleted.)",
-                               parent=self.root):
-            self.history.clear()
+        self.history.reload()
+        old = list(self.history.items)
+        self.history.clear()
+        self._render_history()
+        self._undo_history = old
+
+        def undo() -> None:
+            items, self._undo_history = getattr(self, "_undo_history", None), None
+            if not items:
+                return
+            self.history.restore(items)
+            self._hist_dirty = True
             self._render_history()
+            self.toast("History restored.", "success")
+
+        def forget() -> None:
+            if getattr(self, "_undo_history", None) is old:
+                self._undo_history = None
+        self.toast("History cleared.", "info", action=("Undo", undo), duration=8000)
+        self.root.after(8500, forget)
 
     # --------------------------------------------------------------- settings
     def open_settings(self) -> None:
@@ -1720,11 +1749,14 @@ class App:
                 open_url(web_link(job.code))
                 self.toast("BuzzHeavier asked for a browser check — opened the link in your browser.", "info",
                            action=("Open again", lambda: open_url(web_link(job.code))), duration=7000)
+            elif job.blocked:
+                self.toast("BuzzHeavier wants a quick check in your browser before this file can download.",
+                           "info", action=("Open in browser", lambda: open_url(web_link(job.code))), duration=10000)
+                self.notify("Open this download in your browser", "BuzzHeavier wants a quick check first. "
+                            "Open BuzzDrop and click “Open in browser”.")
             else:
-                action = (("Open in browser", lambda: open_url(web_link(job.code))) if job.blocked
-                          else ("Retry", lambda: self.retry(job)))
-                self.toast("%s — %s" % (job.error_title or "Failed", job.error or ""), "error", action=action,
-                           duration=7000)
+                self.toast("%s — %s" % (job.error_title or "Failed", job.error or ""), "error",
+                           action=("Retry", lambda: self.retry(job)), duration=7000)
                 self.notify(job.error_title or "Transfer failed", job.error or job.label)
         self._hist_dirty = True
         if self.page == "history" and not self.in_settings:

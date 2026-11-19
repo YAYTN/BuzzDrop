@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 1.1.4
+
+- **Clear history asks nothing, and can be undone:** the list is cleared at once, and a message offers **Undo** for 8 seconds. The copy kept for Undo lives in memory only and is dropped afterwards. Only the list is ever cleared, never files or shared links.
+- **Pause and resume:** every upload and download that is moving data has a Pause button (and Resume). It works only while BuzzDrop is open and saves nothing to disk; closing BuzzDrop still ends the transfer. A paused transfer does not hold up the waiting ones. If the server hangs up during a long pause, the transfer simply carries on (downloads from where they stopped; a single file upload starts again) without counting it as a failure.
+- **Clearer browser-check message:** when BuzzHeavier wants a quick check in a web browser, BuzzDrop now says so plainly ("Needs your browser"), shows it as a next step instead of a red error, and offers "Open in browser".
+
 ## 1.1.3
 
 - **Deleting the program by hand no longer leaves a mess (Windows):** the right-click menu, BZ:// links, start-at-login and the Settings > Apps entry now start BuzzDrop through a tiny script (`guard.js` in the settings folder, run by Windows' own script host, no window). If BuzzDrop is there, it just starts as before. If someone deleted it, the first click removes those leftover entries, the Start menu shortcut and the `buzz` command files, shows one short message, and deletes the script. Settings and history are left alone. Existing installs switch over by themselves the first time the new version runs; a normal uninstall removes the script too.

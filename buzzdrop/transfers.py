@@ -23,7 +23,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional
 from .api import BlockedError, BuzzError, CancelledError, Client, NetworkError, NotFoundError, ServerError
 from .chunks import MIN_CHUNK, download_parts, read_manifest, split_bytes_from_settings, upload_chunked
 from .config import download_dir
-from .util import Cancelled, extract_zip, format_size, is_zip_name, safe_filename, zip_paths
+from .util import Cancelled, StopFlag, extract_zip, format_size, is_zip_name, safe_filename, zip_paths
 
 log = logging.getLogger("buzz")
 
@@ -50,7 +50,7 @@ class Job:
         self.error_title: Optional[str] = None
         self.blocked = False          # needs the browser
         self.result: Dict[str, Any] = {}
-        self.cancel = threading.Event()
+        self.cancel = StopFlag()          # also carries the pause switch (in memory only)
         self.created = time.time()
         self._samples: Deque = deque()
         self.speed = 0.0
@@ -91,6 +91,32 @@ class Job:
     def active(self) -> bool:
         return self.state in (QUEUED, RUNNING)
 
+    # -- pause / resume (in memory only: nothing about the transfer is saved) --------------
+    @property
+    def paused(self) -> bool:
+        return self.cancel.paused
+
+    @property
+    def can_pause(self) -> bool:
+        """Only while bytes are actually moving; packing and unpacking just finish."""
+        return self.state == RUNNING and self.phase.startswith(("Upload", "Download", "Paused"))
+
+    def pause(self) -> None:
+        if self.can_pause and not self.paused:
+            self._phase_before_pause = self.phase
+            self.cancel.pause()
+            self.speed = 0.0
+            self.phase = "Paused"
+            self._changed()
+
+    def resume(self) -> None:
+        if self.paused:
+            self._samples.clear()
+            self.speed = 0.0
+            self.phase = getattr(self, "_phase_before_pause", None) or "Resuming…"
+            self.cancel.resume()
+            self._changed()
+
     def _changed(self) -> None:
         if self.on_change:
             try:
@@ -117,11 +143,18 @@ def _upload_with_retry(job: Job, client: Client, target: Path):
     """
     attempt = 0
     while True:
+        pauses_before = job.cancel.pauses
         try:
             return client.upload(target, note=job.note, progress=job.progress, cancel=job.cancel)
         except (NetworkError, ServerError) as exc:
             if isinstance(exc, ServerError) and "HTTP 5" not in str(exc):
                 raise
+            if job.cancel.pauses != pauses_before:
+                # The server gave up waiting while the upload was paused. One file can't be continued
+                # half-way, so it starts again; that is no failure and doesn't use up a retry.
+                job.set_phase("Uploading…", reset=True)
+                job.total = target.stat().st_size
+                continue
             attempt += 1
             if attempt > UPLOAD_RETRIES:
                 raise
@@ -316,10 +349,17 @@ class TransferManager:
     def busy(self) -> bool:
         return any(j.active for j in self.jobs)
 
+    def pause(self, job: Job) -> None:
+        job.pause()
+        self._pump()                  # a paused transfer doesn't hold a slot: the next waiting one may start
+
+    def resume(self, job: Job) -> None:
+        job.resume()
+
     def _pump(self) -> None:
         limit = int(self.get_settings().get("max_parallel") or 2)
         with self._lock:
-            while self._running < limit:
+            while sum(1 for j in self.jobs if j.state == RUNNING and not j.paused) < limit:
                 job = next((j for j in self.jobs if j.state == QUEUED and not j.cancel.is_set()), None)
                 if job is None:
                     break
@@ -360,6 +400,8 @@ def describe(job: Job) -> str:
     if job.state == CANCELLED:
         return "Cancelled"
     if job.state == FAILED:
+        if job.blocked:   # not a failure of ours: BuzzHeavier wants a person in a browser
+            return "Needs a quick check in your browser — use “Open in browser”"
         return job.error or "Failed"
     size = format_size(job.result.get("size", 0))
     if job.kind == SEND:

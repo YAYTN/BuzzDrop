@@ -128,6 +128,34 @@ class GuiEndToEnd(unittest.TestCase):
             except tk.TclError:
                 pass
 
+    def test_a_running_transfer_row_offers_pause_then_resume(self):
+        import tkinter as tk
+        from buzzdrop.gui import app as A
+        from buzzdrop.transfers import Job, RECEIVE, RUNNING
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        try:
+            job = Job(RECEIVE, "BZ://abcdefgh", code="abcdefgh")
+            job.state, job.phase = RUNNING, "Downloading…"
+            row = A.TransferRow(app.root, app, job)
+            names = lambda: [a[1] for a in row._actions_for_state()]   # noqa: E731
+            self.assertEqual(names(), ["Pause", "Cancel"])
+            job.pause()
+            self.assertEqual(names(), ["Resume", "Cancel"])
+            job.resume()
+            self.assertEqual(names(), ["Pause", "Cancel"])
+            job.phase = "Extracting…"                                  # unpacking just finishes
+            self.assertEqual(names(), ["Cancel"])
+            row.destroy()
+        finally:
+            app.quit()
+            try:
+                self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
     def _update_app(self):
         """An App wired to a fake GitHub and a stand-in 'installed exe' in a temp folder."""
         import tkinter as tk
@@ -280,6 +308,44 @@ class GuiEndToEnd(unittest.TestCase):
             app.quit()                                        # … and everything goes when quitting
             self._pump(root, lambda: False, timeout=0.8)
             self.assertEqual(names(), [])
+        finally:
+            try:
+                app.quit()
+                self._pump(root, lambda: False, timeout=0.3)
+            except tk.TclError:
+                pass
+
+    def test_clear_history_asks_nothing_and_can_be_undone(self):
+        import tkinter as tk
+        from unittest import mock
+        from buzzdrop.gui import app as A
+
+        now = time.time()
+        hist = Path(self.tmp.name, "history.json")
+        hist.write_text(json.dumps([
+            {"kind": "send", "name": "one", "code": "aaaa11112222", "size": 1, "time": now - 60, "path": ""},
+            {"kind": "send", "name": "two", "code": "bbbb11112222", "size": 1, "time": now - 120, "path": ""}]))
+        root = tk.Tk()
+        root.withdraw()
+        app = A.App(root, {"cmd": "open"}, None)
+        root.attributes("-alpha", 0.0)
+        toasts = []
+        try:
+            root.update()
+            names = lambda: [e["name"] for e in json.loads(hist.read_text())]   # noqa: E731
+            with mock.patch.object(A.messagebox, "askyesno", side_effect=AssertionError("no question expected")), \
+                    mock.patch.object(app, "toast", lambda *a, **k: toasts.append((a, k))):
+                app.clear_history()
+                self.assertEqual(names(), [])                         # gone from disk immediately
+                label, undo = toasts[0][1]["action"]
+                self.assertEqual(label, "Undo")
+                undo()
+                self.assertEqual(names(), ["one", "two"])             # back, in order
+                self.assertIsNone(app._undo_history)                  # the in-memory copy is dropped
+                app.clear_history()
+                app._undo_history = None                              # as if the toast had expired
+                toasts[-1][1]["action"][1]()
+                self.assertEqual(names(), [])                         # too late to undo: stays cleared
         finally:
             try:
                 app.quit()

@@ -1,0 +1,24 @@
+name: CI (macOS, best effort)
+
+# A courtesy check on macOS. GitHub's Mac runners are scarce and often queue or cancel jobs, and the macOS
+# app is untested by its author, so this never blocks anything: it is a separate workflow, and a failure
+# here does not change the result of the main CI run or of a release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-macos:
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Unit tests (no network, no dependencies)
+        run: python -m unittest discover -s tests -t . -v

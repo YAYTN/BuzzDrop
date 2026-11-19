@@ -1,5 +1,8 @@
 name: CI
 
+# Windows and Linux: these decide whether a change is good. macOS is checked separately (ci-macos.yml)
+# so that its scarce, slow runners can never hold up or redden this run.
+
 on:
   push:
     branches: [main]
@@ -10,14 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-latest]   # 22.04: "latest" Ubuntu no longer ships Python 3.9
+        os: [ubuntu-22.04, windows-latest]   # 22.04: "latest" Ubuntu no longer ships Python 3.9
         python: ["3.9", "3.13"]
-        exclude:
-          - os: macos-latest
-            python: "3.9"   # no Apple-silicon build of 3.9 on GitHub runners
     runs-on: ${{ matrix.os }}
-    # GitHub's Mac runners are scarce and often queue or cancel jobs; that must not turn the run red.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

@@ -206,7 +206,7 @@ def cmd_send(argv: List[str]) -> int:
     except KeyboardInterrupt:
         printer.say("Cancelled.")
         return 130
-    apply_history_policy(history, settings, closing=True)   # opt-in privacy setting; a no-op by default
+    apply_history_policy(history, settings, closing=True)   # the "forget my history" privacy setting
     if links and not a.no_copy and settings.get("copy_link", True):
         if copy_text("\n".join(links)) and not a.json:
             printer.say("Copied to clipboard.")
@@ -261,7 +261,7 @@ def cmd_get(argv: List[str]) -> int:
     except KeyboardInterrupt:
         printer.say("Cancelled.")
         return 130
-    apply_history_policy(history, settings, closing=True)   # opt-in privacy setting; a no-op by default
+    apply_history_policy(history, settings, closing=True)   # the "forget my history" privacy setting
     if a.json:
         print(json.dumps(results, indent=2))
     return 0 if all(r["ok"] for r in results) else 1

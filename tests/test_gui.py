@@ -27,7 +27,8 @@ class GuiEndToEnd(unittest.TestCase):
         Path(self.tmp.name, "config.json").write_text(json.dumps({
             "integration_setup_done": True, "enable_global_hotkey": False, "watch_clipboard": False,
             "check_for_updates": False, "copy_link": False, "launch_folder_after_download": False,
-            "notifications": False, "download_folder": str(self.dl), "theme": "dark"}))
+            "notifications": False, "download_folder": str(self.dl), "theme": "dark",
+            "open_blocked_in_browser": False, "history_keep_days": 0}))
 
     def tearDown(self):
         os.environ.clear()
@@ -207,6 +208,45 @@ class GuiEndToEnd(unittest.TestCase):
             self.assertEqual(exe.read_bytes(), APP_BYTES)              # now installed …
             self.assertEqual((exe.parent / "BuzzDrop.exe.old").read_bytes(), b"OLD")   # … with a backup
             self.assertEqual(launched, [(exe, os.getpid())])
+        finally:
+            cleanup()
+            try:
+                self._pump(root, lambda: False, timeout=0.5)
+            except tk.TclError:
+                pass
+
+    def test_automatic_update_installs_only_while_idle_in_the_tray(self):
+        import tkinter as tk
+        from unittest import mock
+        from buzzdrop import updater
+        from buzzdrop.gui import app as A
+        from .test_updater import APP_BYTES
+        root, app, exe, cleanup = self._update_app()
+        try:
+            app.settings.update(auto_update=True, run_in_background=True)
+            app.start_update_download()
+            self.assertTrue(self._pump(root, lambda: app._update_state == "ready"))
+            launched = []
+            with mock.patch.object(A, "IS_WIN", True), mock.patch.object(app, "shell", mock.Mock()), \
+                    mock.patch.object(app, "quit"), \
+                    mock.patch.object(updater, "relaunch", lambda *a: launched.append(a)):
+                root.deiconify()                                       # the window is open: never touch it
+                app._quiet_update_check()
+                self.assertEqual((exe.read_bytes(), launched), (b"OLD", []))
+                root.withdraw()
+                with mock.patch.object(type(app.manager), "busy", new_callable=mock.PropertyMock, return_value=True):
+                    app._quiet_update_check()                          # a transfer is running: wait
+                self.assertEqual((exe.read_bytes(), launched), (b"OLD", []))
+                app.settings["auto_update"] = False                    # opted out: wait for the user
+                app._quiet_update_check()
+                self.assertEqual((exe.read_bytes(), launched), (b"OLD", []))
+                app.settings["auto_update"] = True
+                app._quiet_update_check()                              # hidden in the tray and idle: install, back in the tray
+                self.assertEqual(exe.read_bytes(), APP_BYTES)
+                self.assertEqual(launched, [(exe, os.getpid(), "--background")])
+                self.assertTrue(app._keep_history_on_quit)             # an automatic restart is not "quitting"
+                app._quiet_update_check()
+                self.assertEqual(len(launched), 1)                     # and it only ever happens once
         finally:
             cleanup()
             try:

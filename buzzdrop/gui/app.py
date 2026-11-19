@@ -429,6 +429,8 @@ class App:
         self.page = "send"
         self.in_settings = False
         self.update_info: Optional[dict] = None
+        self._quiet_tried = False        # an automatic (hidden) install was attempted for the downloaded update
+        self._keep_history_on_quit = False
         self._update_state = "idle"      # idle → downloading → ready (nothing restarts until the user says so)
         self._update_pct = 0.0
         self._update_file = None
@@ -950,7 +952,7 @@ class App:
         self._hist_dirty = False
 
     def _apply_history_policy(self, closing: bool = False) -> None:
-        """The opt-in "forget my history automatically" setting (off by default)."""
+        """The "forget my history automatically" setting (on exit by default)."""
         try:
             removed = apply_history_policy(self.history, self.settings, closing)
         except Exception as exc:  # never let housekeeping disturb the app
@@ -1140,16 +1142,18 @@ class App:
             toggle("auto_extract_zip"))
         row(card, "Delete the ZIP after extracting", "Keeps Downloads tidy. If extracting fails, the ZIP is kept.",
             toggle("delete_zip_after_extract"))
-        row(card, "Show in folder when done", "", toggle("launch_folder_after_download"))
+        row(card, "Show in folder when done", "Opens the folder with your file selected once a download finishes.",
+            toggle("launch_folder_after_download"))
         row(card, "Offer to download copied links", "When you copy a BZ:// link, BuzzDrop offers to fetch it.",
             toggle("watch_clipboard"))
         row(card, "Open blocked links in my browser", "If BuzzHeavier asks for a browser check, open the file's "
-            "page for me. Off by default: you get an \"Open in browser\" button instead.",
+            "page for me. Turn it off to get an \"Open in browser\" button instead.",
             toggle("open_blocked_in_browser"))
 
         # -- Sending
         card = section("Sending")
-        row(card, "Copy the link when an upload finishes", "", toggle("copy_link"))
+        row(card, "Copy the link when an upload finishes", "So you can paste it straight into a chat.",
+            toggle("copy_link"))
         row(card, "Clear the copied link after a while", "Removes the link from your clipboard — only if you "
             "haven't copied anything else since. (Windows' own Win+V history keeps its own copy.)" if IS_WIN else
             "Removes the link from your clipboard — only if you haven't copied anything else since.",
@@ -1163,12 +1167,12 @@ class App:
             "only repeats one part. Off by default. The person downloading needs BuzzDrop to get the file in one "
             "step; without it they must join the parts themselves.",
             seg("split_mb", [("0", "Off"), ("500", "500 MB"), ("1000", "1 GB"), ("2000", "2 GB")], width=270))
-        row(card, "Transfers at the same time", "",
+        row(card, "Transfers at the same time", "How many uploads and downloads run at once. The rest wait in line.",
             seg("max_parallel", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], width=170))
 
         # -- Appearance
         card = section("Appearance")
-        row(card, "Theme", "", seg("theme", [("system", "System"), ("dark", "Dark"), ("light", "Light")],
+        row(card, "Theme", "System follows your computer's light or dark setting.", seg("theme", [("system", "System"), ("dark", "Dark"), ("light", "Light")],
                                    after=lambda v: self.root.after(180, lambda: self.rebuild(settings_open=True))))
         def swatches(parent):
             f = tk.Frame(parent, bg=c.surface)
@@ -1185,7 +1189,7 @@ class App:
                                                           self.root.after(60, lambda: self.rebuild(settings_open=True))))
             return f
         swatches.stack = True
-        row(card, "Accent color", "", swatches)
+        row(card, "Accent color", "The highlight color used across the app.", swatches)
         row(card, "Background style", "Changes the colors behind everything. Works with light and dark.",
             seg("palette", PALETTE_LABELS, width=340,
                 after=lambda v: self.root.after(180, lambda: self.rebuild(settings_open=True))))
@@ -1211,7 +1215,7 @@ class App:
             self._apply_history_policy()
         row(card, "Forget my history automatically", "Removes the list of what you sent and received, and "
             "nothing else: files you downloaded and links you shared are not touched. “On exit” means when you "
-            "quit BuzzDrop (closing the window to the tray doesn't count). Off by default.",
+            "quit BuzzDrop (closing the window to the tray doesn't count). On exit by default.",
             seg("history_keep_days", [("0", "Off"), ("-1", "On exit"), ("1", "1 day"), ("7", "7 days"),
                                       ("30", "30 days")], after=history_changed, width=340))
 
@@ -1221,8 +1225,10 @@ class App:
             "protocol": ("Open BZ:// links with %s" % APP_NAME, "Click a BZ:// link anywhere to start the download."
                          + (" Also adds BuzzDrop to your app menu." if not (IS_WIN or IS_MAC) else "")),
             "context_menu": ("“Send with %s” in the right-click menu" % APP_NAME,
-                             "Explorer" if IS_WIN else "Files (Nautilus), Nemo and Dolphin"),
-            "shortcut": ("Start menu shortcut", ""),
+                             "Right-click any file in Explorer to upload it." if IS_WIN
+                             else "Right-click a file in Files (Nautilus), Nemo or Dolphin to upload it."),
+            "shortcut": ("Start menu shortcut", "Lets you find and start BuzzDrop from the Start menu."
+                         if IS_WIN else "Lets you find and start BuzzDrop from your app menu."),
             "cli": ("`buzz` terminal command", "buzz send FILE · buzz get LINK"),
         }
         for feature, (title, desc) in labels.items():
@@ -1266,10 +1272,12 @@ class App:
                    bg=c.surface).pack(side="right")
             return f
         row(card, "%s %s" % (APP_NAME, __version__), "Free & open source · MIT licence", about_ctrl)
-        row(card, "Check for updates automatically", "", toggle("check_for_updates"))
+        row(card, "Check for updates automatically", "Asks GitHub for the latest version number about once "
+            "a day.", toggle("check_for_updates"))
         if self._self_update_possible():
-            row(card, "Download updates in the background", "The update installs the next time you close "
-                "BuzzDrop. Nothing restarts while you work.", toggle("auto_update"))
+            row(card, "Update automatically", "Downloads new versions quietly and installs them while BuzzDrop "
+                "is idle in the tray. Nothing restarts while the window is open or a transfer is running.",
+                toggle("auto_update"))
         if self.update_info:
             def skip_ctrl(parent):
                 f = tk.Frame(parent, bg=c.surface)
@@ -1451,17 +1459,33 @@ class App:
         self._update_silent = False
 
     def _update_ready(self, new) -> None:
-        self._update_state, self._update_file = "ready", new
+        self._update_state, self._update_file, self._quiet_tried = "ready", new, False
         self._render_update_pill()
         if not self._update_silent:
             self.toast("BuzzDrop %s is ready. Restart whenever you like." % self.update_info["version"], "success",
                        action=("Restart", self.restart_for_update), duration=8000)
         self._update_silent = False
 
-    def restart_for_update(self) -> None:
+    def _quiet_update_check(self) -> None:
+        """Opted-in automatic updates: once the update is downloaded, install it while BuzzDrop sits idle
+        in the tray (window hidden, nothing transferring) and come back up in the tray."""
+        if self._closing:
+            return
+        try:
+            idle = (self.settings.get("auto_update") and self._update_state == "ready" and not self._update_applied
+                    and not self._quiet_tried and IS_WIN and self.shell and self.settings.get("run_in_background")
+                    and self.root.state() == "withdrawn" and not self.manager.busy)
+        except tk.TclError:
+            idle = False
+        if idle:
+            self._quiet_tried = True          # one attempt per downloaded update: if it fails, the next real quit installs it
+            self.restart_for_update(quiet=True)
+        self.root.after(5 * 60 * 1000, self._quiet_update_check)
+
+    def restart_for_update(self, quiet: bool = False) -> None:
         if self._update_state != "ready" or self._update_applied or not self._update_file:
             return
-        if self.manager.busy and not messagebox.askyesno(
+        if not quiet and self.manager.busy and not messagebox.askyesno(
                 APP_NAME, "Transfers are still running.\nCancel them and restart to update?",
                 icon="warning", parent=self.root):
             return
@@ -1472,8 +1496,12 @@ class App:
             self.toast(str(exc), "error", duration=7000)
             return
         self._update_applied = True
+        self._keep_history_on_quit = quiet     # an automatic restart is not the user quitting: don't forget their history
         try:
-            updater.relaunch(exe, os.getpid())
+            if quiet:
+                updater.relaunch(exe, os.getpid(), "--background")    # comes back up in the tray
+            else:
+                updater.relaunch(exe, os.getpid())
         except OSError as exc:
             log.warning("could not relaunch: %s", exc)
             self.toast("Updated. Close and reopen BuzzDrop to use the new version.", "success", duration=9000)
@@ -1650,6 +1678,7 @@ class App:
             self._check_updates(manual=False)
         self._apply_history_policy()
         self.root.after(30 * 60 * 1000, self._history_timer)
+        self.root.after(60 * 1000, self._quiet_update_check)
         exe = updater.current_exe()
         if exe is not None:  # once the app has run fine for a while, drop the previous version's backup
             def tidy() -> None:
@@ -1871,7 +1900,8 @@ class App:
             if self.manager.busy and time.monotonic() < deadline:
                 self.root.after(50, wait)
             else:
-                self._apply_history_policy(closing=True)   # "forget on quit", after cancelled transfers settled
+                if not self._keep_history_on_quit:
+                    self._apply_history_policy(closing=True)   # "forget on quit", after cancelled transfers settled
                 if self._uninstalling is not None:
                     self._finish_uninstall()               # delete settings + program, now that nothing writes
                 self.root.destroy()

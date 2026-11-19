@@ -55,9 +55,16 @@ class ConfigTests(TempData):
         s = config.load_settings()
         self.assertTrue(s["delete_zip_after_extract"])      # fewer leftover files
         self.assertEqual(s["global_hotkey"], "Ctrl+Shift+F1")
-        self.assertEqual(s["clear_clipboard_s"], 0)         # clipboard clearing is opt-in
+        self.assertEqual(s["clear_clipboard_s"], 30)        # what BuzzDrop copied is wiped after 30 s
         self.assertEqual(s["accent"], "teal")
         self.assertEqual(s["split_mb"], 0)                  # split uploads are opt-in
+        self.assertEqual(s["link_style"], "https")
+        self.assertTrue(s["open_blocked_in_browser"])
+        self.assertTrue(s["run_in_background"])
+        self.assertTrue(s["notifications"])                 # on until people opt out
+        self.assertEqual(s["theme"], "system")
+        self.assertTrue(s["auto_update"])
+        self.assertFalse(s["bundle_multiple"])
 
     def test_config_edited_in_notepad_with_bom_still_loads(self):
         Path(self.tmp.name, "config.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"theme": "light"}).encode())
@@ -113,10 +120,10 @@ class ConfigTests(TempData):
         self.assertEqual(h.prune(1, now=now), 1)                     # "week" goes; the entry without a time is kept
         self.assertEqual([e["name"] for e in h.items], ["new", "no-time"])
 
-    def test_history_is_kept_forever_unless_the_user_opts_in(self):
+    def test_history_is_forgotten_on_exit_by_default_and_kept_when_set_to_off(self):
         now = time.time()
         h = self._write_history(now)
-        self.assertEqual(config.DEFAULTS["history_keep_days"], 0)
+        self.assertEqual(config.DEFAULTS["history_keep_days"], -1)   # privacy first; "Off" keeps it forever
         for closing in (False, True):
             self.assertEqual(config.apply_history_policy(h, {"history_keep_days": 0}, closing), 0)
             self.assertEqual(config.apply_history_policy(h, {}, closing), 0)
@@ -140,7 +147,7 @@ class ConfigTests(TempData):
 
     def test_corrupt_config_falls_back(self):
         Path(self.tmp.name, "config.json").write_text("{not json")
-        self.assertEqual(config.load_settings()["theme"], "system")
+        self.assertEqual(config.load_settings()["theme"], config.DEFAULTS["theme"])
 
     def test_history_merges_and_caps(self):
         h1, h2 = config.History(), config.History()
@@ -254,6 +261,7 @@ class CliTests(TempData):
         srv = MockBuzz()
         try:
             env = {"BUZZ_BASE_URL": srv.url, "BUZZ_UPLOAD_URL": srv.url}
+            (Path(self.tmp.name) / "config.json").write_text(json.dumps({"history_keep_days": 0}))   # keep history (default is "on exit")
             src = Path(self.tmp.name) / "hello world.txt"
             src.write_text("hi from the cli")
             r = self._run("send", str(src), "--json", "--no-copy", "--https", env_extra=env)

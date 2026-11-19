@@ -238,9 +238,10 @@ def _independent_env() -> dict:
     return env
 
 
-def relaunch(exe: Path, old_pid: int) -> None:
-    """Start the updated app; it waits for *old_pid* to exit first (single-instance safe)."""
-    subprocess.Popen([str(exe), "--after-update", str(old_pid)], close_fds=True, cwd=str(Path(exe).parent),
+def relaunch(exe: Path, old_pid: int, extra: Optional[str] = None) -> None:
+    """Start the updated app; it waits for *old_pid* to exit first (single-instance safe).
+    *extra* is one more flag for it, e.g. ``--background`` to come back up in the tray."""
+    subprocess.Popen([str(exe), "--after-update", str(old_pid)] + ([extra] if extra else []), close_fds=True, cwd=str(Path(exe).parent),
                      env=_independent_env(), creationflags=_DETACHED if IS_WIN else 0)
 
 

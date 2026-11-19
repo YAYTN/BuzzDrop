@@ -697,7 +697,11 @@ def set_feature(feature: str, on: bool) -> None:
 def setup_defaults() -> List[str]:
     """First-run setup: make BZ:// links and the right-click entry work out of the box."""
     done = []
-    want = ["protocol", "context_menu"] + (["shortcut"] if is_frozen() else [])
+    want = ["protocol", "context_menu"] + (["shortcut", "cli"] if is_frozen() else [])
+    if IS_WIN and is_frozen():
+        from .config import is_portable   # portable mode leaves no traces, so no start-at-login there
+        if not is_portable():
+            want.append("autostart")
     sup = supported()
     for feature in want:
         if sup.get(feature):

@@ -150,27 +150,27 @@ DEFAULTS: Dict[str, Any] = {
     "delete_zip_after_extract": True,    # fewer files lying around; the ZIP is kept if extracting fails
     "launch_folder_after_download": True,
     "watch_clipboard": True,             # offer to download links you copy
-    "open_blocked_in_browser": False,    # on a BuzzHeavier browser check: open the page automatically
+    "open_blocked_in_browser": True,     # on a BuzzHeavier browser check: open the page automatically
     # Sending
     "copy_link": True,
-    "link_style": "bz",                  # "bz" → BZ://code, "https" → https://buzzheavier.com/code
+    "link_style": "https",               # "bz" → BZ://code, "https" → https://buzzheavier.com/code (clickable in every chat app)
     "bundle_multiple": False,            # several files → one ZIP / one link
     "split_mb": 0,                       # optional: >0 → send files bigger than this in parts of this size
     # General
-    "history_keep_days": 0,              # privacy, opt-in: 0 keep forever · -1 forget on quit · N>0 forget entries older than N days
+    "history_keep_days": -1,             # privacy: 0 keep forever · -1 forget on quit (default) · N>0 forget entries older than N days
     "theme": "system",                   # system | dark | light
     "accent": "teal",                    # teal | blue | violet | rose | amber | green
     "palette": "default",                # default | ocean | neutral | warm | pure (background colours)
-    "clear_clipboard_s": 0,              # >0: wipe the link BuzzDrop copied after this many seconds
+    "clear_clipboard_s": 30,             # >0: wipe the link BuzzDrop copied after this many seconds (0 = never)
     "notifications": True,
     "check_for_updates": True,
-    "auto_update": False,                # download updates in the background; they install when you next quit
+    "auto_update": True,                 # download updates quietly; install while idle in the tray (or when you next quit)
     "skipped_version": "",               # a version the user chose not to be reminded about
     "max_parallel": 2,
     # Windows extras
     "enable_global_hotkey": True,
     "global_hotkey": "Ctrl+Shift+F1",
-    "run_in_background": False,          # tray icon + start at login
+    "run_in_background": True,           # tray icon + start at login (Windows)
     # Internal
     "integration_setup_done": False,
     "window": None,                      # [w, h, x, y]
@@ -285,7 +285,7 @@ class History:
 def apply_history_policy(history: History, settings: Dict[str, Any], closing: bool = False) -> int:
     """Apply the opt-in "forget my history automatically" setting. Returns how many entries were forgotten.
 
-    ``history_keep_days``: 0 = keep forever (default); N > 0 = forget entries older than N days;
+    ``history_keep_days``: 0 = keep forever; N > 0 = forget entries older than N days;
     -1 = forget everything when BuzzDrop quits (only acts when *closing* is true).
     """
     try:

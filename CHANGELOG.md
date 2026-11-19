@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 1.1.5
+
+- **New installs start with a better set of defaults:** https:// links, the copied link is wiped from the clipboard after 30 seconds, "Forget my history" is set to *On exit*, blocked links open in your browser by themselves, and BuzzDrop runs in the background (tray icon and start at login, hotkey keeps working). First-run setup now also adds the `buzz` terminal command and start-at-login. Every one of these is a normal setting and can be changed or turned off in Settings. **Installs that already exist keep their current settings; nothing changes for them.**
+- **Updates install themselves:** "Update automatically" is on by default. New versions download quietly and install while BuzzDrop is idle in the tray, then it comes back up in the tray. It never restarts while the window is open or a transfer is running. Turn it off to be asked instead.
+- **Every setting has a short description** now, and the "Open blocked links" text no longer claims it is off by default.
+- When "Forget my history" is on *On exit*, the one-shot `buzz send` / `buzz get` commands forget history when they finish, like quitting the app does.
+
 ## 1.1.4
 
 - **Clear history asks nothing, and can be undone:** the list is cleared at once, and a message offers **Undo** for 8 seconds. The copy kept for Undo lives in memory only and is dropped afterwards. Only the list is ever cleared, never files or shared links.

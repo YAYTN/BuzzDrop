@@ -223,6 +223,9 @@ class InstallTests(unittest.TestCase):
         self.assertNotIn("_MEIPASS2", seen["env"])
         self.assertEqual(seen["env"]["KEEP_ME"], "1")                       # everything else is passed on
         self.assertEqual(seen["cmd"][1:], ["--after-update", "1234"])
+        with mock.patch.object(subprocess, "Popen", lambda cmd, **kw: seen.update(cmd=cmd, **kw)):
+            updater.relaunch(self.cur, 1234, "--background")                 # an automatic update comes back in the tray
+        self.assertEqual(seen["cmd"][1:], ["--after-update", "1234", "--background"])
         # the start-up check of the freshly downloaded file gets the same clean start
         seen.clear()
         with mock.patch.object(subprocess, "run", lambda cmd, **kw: (seen.update(kw), mock.Mock(returncode=0, stdout="BuzzDrop 9.9.9"))[1]):
